@@ -90,6 +90,7 @@ public class Room : MonoBehaviour
         if (!Application.isPlaying && warnOnOverlap)
         {
             WarnAboutOverlaps();
+            WarnAboutInvalidExits();
         }
 #endif
     }
@@ -180,6 +181,16 @@ public class Room : MonoBehaviour
         return spawnPoints.Length > 0 ? spawnPoints[0] : null;
     }
 
+#if UNITY_EDITOR
+    public void ConfigureForEditor(string newRoomId, Vector2Int newSizeUnits, List<RoomExit> newExits)
+    {
+        roomId = newRoomId;
+        sizeUnits = newSizeUnits;
+        exits = newExits != null ? newExits : new List<RoomExit>();
+        OnValidate();
+    }
+#endif
+
     public List<Room> GetOverlappingRooms()
     {
         List<Room> overlappingRooms = new List<Room>();
@@ -251,6 +262,32 @@ public class Room : MonoBehaviour
             Debug.LogWarning(
                 string.Format("Room overlap detected: {0} overlaps {1}. Touching edges is valid; overlapping area is not.", RoomId, other.RoomId),
                 this);
+        }
+    }
+
+    private void WarnAboutInvalidExits()
+    {
+        for (int i = 0; i < exits.Count; i++)
+        {
+            RoomExit exit = exits[i];
+            if (exit.targetRoom == null)
+            {
+                Debug.LogWarning(string.Format("Room exit '{0}' on {1} has no target room.", exit.GetDisplayId(), RoomId), this);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(exit.targetSpawnId))
+            {
+                Debug.LogWarning(string.Format("Room exit '{0}' on {1} has no target spawn id.", exit.GetDisplayId(), RoomId), this);
+                continue;
+            }
+
+            if (exit.targetRoom.FindSpawnPoint(exit.targetSpawnId) == null)
+            {
+                Debug.LogWarning(
+                    string.Format("Room exit '{0}' on {1} targets missing spawn '{2}' in {3}.", exit.GetDisplayId(), RoomId, exit.targetSpawnId, exit.targetRoom.RoomId),
+                    this);
+            }
         }
     }
 

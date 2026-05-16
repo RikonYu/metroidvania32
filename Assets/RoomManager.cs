@@ -9,6 +9,8 @@ public class RoomManager : MonoBehaviour
     [SerializeField] private MCController player;
     [SerializeField] private CamParent cameraRig;
     [SerializeField] private float transitionInputLock = 0.1f;
+    [SerializeField] private bool validateRoomParenting = true;
+    [SerializeField] private bool drawDebugGizmos = true;
 
     public Room ActiveRoom { get; private set; }
 
@@ -18,6 +20,7 @@ public class RoomManager : MonoBehaviour
         CacheSceneReferences();
         BuildAllRoomTriggers();
         SetActiveRoom(startingRoom != null ? startingRoom : FindPlayerRoom());
+        ValidateRoomParenting();
     }
 
     public void Transition(Room sourceRoom, RoomExit exit, MCController transitionPlayer)
@@ -133,5 +136,75 @@ public class RoomManager : MonoBehaviour
         }
 
         return rooms.Length > 0 ? rooms[0] : null;
+    }
+
+    private void ValidateRoomParenting()
+    {
+        if (!validateRoomParenting)
+        {
+            return;
+        }
+
+        Component[] components = FindObjectsOfType<Component>(true);
+        for (int i = 0; i < components.Length; i++)
+        {
+            Component component = components[i];
+            if (component == null)
+            {
+                continue;
+            }
+
+            GameObject go = component.gameObject;
+            if (!RequiresRoomParent(go) || go.GetComponentInParent<Room>(true) != null)
+            {
+                continue;
+            }
+
+            Debug.LogWarning(
+                string.Format("Scene object '{0}' has gameplay components but is not under a Room parent.", go.name),
+                go);
+        }
+    }
+
+    private bool RequiresRoomParent(GameObject go)
+    {
+        if (go.GetComponent<Room>() != null ||
+            go.GetComponent<RoomManager>() != null ||
+            go.GetComponent<MCController>() != null ||
+            go.GetComponent<PlayerRespawn>() != null ||
+            go.GetComponent<CamParent>() != null ||
+            go.GetComponent<Camera>() != null)
+        {
+            return false;
+        }
+
+        return go.GetComponent<Collider2D>() != null ||
+               go.GetComponent<Rigidbody2D>() != null ||
+               go.GetComponent<SpriteRenderer>() != null;
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!drawDebugGizmos)
+        {
+            return;
+        }
+
+        Room room = ActiveRoom != null ? ActiveRoom : startingRoom;
+        if (room == null)
+        {
+            return;
+        }
+
+        Rect rect = room.WorldRect;
+        Gizmos.color = Color.white;
+        Gizmos.DrawWireCube(rect.center, new Vector3(rect.width, rect.height, 0f));
+
+#if UNITY_EDITOR
+        UnityEditor.Handles.color = Color.white;
+        UnityEditor.Handles.Label(
+            new Vector3(rect.center.x, rect.yMax + 1f, 0f),
+            string.Format("Active Room: {0}", room.RoomId));
+#endif
     }
 }
