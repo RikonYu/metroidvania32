@@ -111,6 +111,14 @@ public class MCController : MonoBehaviour
         }
     }
 
+    public void SetVelocity(Vector2 velocity)
+    {
+        if (body != null)
+        {
+            body.velocity = velocity;
+        }
+    }
+
     public Collider2D GetCurrentGround()
     {
         return currentGround;
