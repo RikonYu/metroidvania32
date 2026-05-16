@@ -13,13 +13,13 @@ TagManager:
   - UI
   - 
   - 
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
-  - 
+  - player
+  - ground
+  - obstacle
+  - platform
+  - trigger
+  - enemy
+  - hazard
   - 
   - 
   - 

@@ -59,7 +59,7 @@ public class CamParent : MonoBehaviour
             return;
         }
 
-        Vector3 desired = target.position + (Vector3)followOffset;
+        Vector3 desired = new Vector3(target.position.x + followOffset.x, target.position.y + followOffset.y, transform.position.z);
         transform.position = ClampToCurrentRoom(desired);
         smoothVelocity = Vector3.zero;
     }
@@ -96,6 +96,8 @@ public class CamParent : MonoBehaviour
 
     private Vector3 ClampToCurrentRoom(Vector3 position)
     {
+        position.z = transform.position.z;
+
         if (currentRoom == null || TargetCamera == null)
         {
             return position;
@@ -105,9 +107,22 @@ public class CamParent : MonoBehaviour
         float halfHeight = TargetCamera.orthographicSize;
         float halfWidth = halfHeight * TargetCamera.aspect;
 
-        position.x = Mathf.Clamp(position.x, rect.xMin + halfWidth, rect.xMax - halfWidth);
-        position.y = Mathf.Clamp(position.y, rect.yMin + halfHeight, rect.yMax - halfHeight);
+        position.x = ClampAxis(position.x, rect.xMin, rect.xMax, halfWidth);
+        position.y = ClampAxis(position.y, rect.yMin, rect.yMax, halfHeight);
         return position;
+    }
+
+    private static float ClampAxis(float value, float min, float max, float halfViewSize)
+    {
+        const float epsilon = 0.001f;
+        float roomSize = max - min;
+        float viewSize = halfViewSize * 2f;
+        if (roomSize <= viewSize + epsilon)
+        {
+            return (min + max) * 0.5f;
+        }
+
+        return Mathf.Clamp(value, min + halfViewSize, max - halfViewSize);
     }
 
     private void OnDrawGizmosSelected()

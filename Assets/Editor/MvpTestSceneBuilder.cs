@@ -40,19 +40,9 @@ public static class MvpTestSceneBuilder
         CreateSpawn(roomB.transform, "from_left_lower", new Vector3(34f, 2f, 0f), 1);
         CreateSpawn(roomC.transform, "from_left_upper", new Vector3(34f, 18f, 0f), 1);
 
-        roomA.ConfigureForEditor("Room_A", new Vector2Int(1, 2), new List<RoomExit>
-        {
-            new RoomExit { exitId = "right_lower", side = RoomExitSide.Right, index = 0, offset = 1f, length = 4f, targetRoom = roomB, targetSpawnId = "from_left_lower" },
-            new RoomExit { exitId = "right_upper", side = RoomExitSide.Right, index = 1, offset = 17f, length = 4f, targetRoom = roomC, targetSpawnId = "from_left_upper" }
-        });
-        roomB.ConfigureForEditor("Room_B", new Vector2Int(1, 1), new List<RoomExit>
-        {
-            new RoomExit { exitId = "left_to_a", side = RoomExitSide.Left, index = 0, offset = 1f, length = 4f, targetRoom = roomA, targetSpawnId = "from_right" }
-        });
-        roomC.ConfigureForEditor("Room_C", new Vector2Int(1, 1), new List<RoomExit>
-        {
-            new RoomExit { exitId = "left_to_a", side = RoomExitSide.Left, index = 0, offset = 1f, length = 4f, targetRoom = roomA, targetSpawnId = "from_right" }
-        });
+        roomA.ConfigureForEditor("Room_A", new Vector2Int(1, 2), new List<RoomExit>());
+        roomB.ConfigureForEditor("Room_B", new Vector2Int(1, 1), new List<RoomExit>());
+        roomC.ConfigureForEditor("Room_C", new Vector2Int(1, 1), new List<RoomExit>());
 
         CreateRoomContents(roomA, 0f, 0f, true);
         CreateRoomContents(roomB, 32f, 0f, false);
@@ -60,9 +50,7 @@ public static class MvpTestSceneBuilder
 
         GameObject player = CreatePlayer(root.transform);
         GameObject cameraRig = CreateCameraRig(root.transform);
-        GameObject manager = new GameObject("RoomManager");
-        manager.transform.SetParent(root.transform);
-        RoomManager roomManager = manager.AddComponent<RoomManager>();
+        RoomManager roomManager = GetOrCreateRoomManager();
 
         SerializedObject managerObject = new SerializedObject(roomManager);
         managerObject.FindProperty("startingRoom").objectReferenceValue = roomA;
@@ -72,6 +60,35 @@ public static class MvpTestSceneBuilder
 
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         Selection.activeGameObject = root;
+    }
+
+    private static RoomManager GetOrCreateRoomManager()
+    {
+        RoomManager existingRoomManager = Object.FindObjectOfType<RoomManager>();
+        if (existingRoomManager != null)
+        {
+            return existingRoomManager;
+        }
+
+        GameController gameController = Object.FindObjectOfType<GameController>();
+        GameObject gameControllerObject;
+        if (gameController != null)
+        {
+            gameControllerObject = gameController.gameObject;
+        }
+        else
+        {
+            gameControllerObject = new GameObject("GameController");
+            gameController = gameControllerObject.AddComponent<GameController>();
+        }
+
+        RoomManager roomManager = gameControllerObject.GetComponent<RoomManager>();
+        if (roomManager == null)
+        {
+            roomManager = gameControllerObject.AddComponent<RoomManager>();
+        }
+
+        return roomManager;
     }
 
     private static Room CreateRoom(Transform parent, string roomName, Vector3 position, Vector2Int size)

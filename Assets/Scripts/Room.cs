@@ -78,13 +78,17 @@ public class Room : MonoBehaviour
             roomId = gameObject.name;
         }
 
-        SnapToGrid();
+        SnapToGridInEditor();
     }
 
     private void OnValidate()
     {
         SanitizeSize();
-        SnapToGrid();
+
+        if (!Application.isPlaying)
+        {
+            SnapToGridInEditor();
+        }
 
 #if UNITY_EDITOR
         if (!Application.isPlaying && warnOnOverlap)
@@ -96,6 +100,16 @@ public class Room : MonoBehaviour
     }
 
     public void SnapToGrid()
+    {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
+        SnapToGridInEditor();
+    }
+
+    private void SnapToGridInEditor()
     {
         Vector3 position = transform.position;
         position.x = Mathf.Round(position.x / BaseWidth) * BaseWidth;
