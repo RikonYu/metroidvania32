@@ -187,7 +187,9 @@ public static class MvpTestSceneBuilder
             GameLayers.Platform,
             GameLayers.Trigger,
             GameLayers.Enemy,
-            GameLayers.Hazard
+            GameLayers.Hazard,
+            GameLayers.PlayerBullet,
+            GameLayers.EnemyBullet
         };
 
         for (int i = 0; i < layers.Length; i++)

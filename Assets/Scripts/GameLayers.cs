@@ -7,4 +7,6 @@ public static class GameLayers
     public const string Trigger = "trigger";
     public const string Enemy = "enemy";
     public const string Hazard = "hazard";
+    public const string PlayerBullet = "PlayerBullet";
+    public const string EnemyBullet = "EnemyBullet";
 }
