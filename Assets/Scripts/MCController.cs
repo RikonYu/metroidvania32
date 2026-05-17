@@ -20,13 +20,20 @@ public class MCController : MonoBehaviour
     [SerializeField] private LayerMask movementGroundMask;
     [SerializeField] private LayerMask safeGroundMask;
 
+    [Header("Edge Stability")]
+    [SerializeField] private bool preventIdleEdgeSlip = true;
+    [SerializeField] private float idleEdgeSlipInputThreshold = 0.01f;
+    [SerializeField] private float idleEdgeSlipMaxVerticalSpeed = 0.05f;
+
     private Rigidbody2D body;
+    private RigidbodyConstraints2D movementConstraints;
     private float inputX;
     private float coyoteCounter;
     private float jumpBufferCounter;
     private bool jumpHeld;
     private bool inputLocked;
     private Collider2D currentGround;
+    private bool edgeSlipLockActive;
 
     public bool IsGrounded { get; private set; }
     public bool IsOnSafeGround { get; private set; }
@@ -41,12 +48,22 @@ public class MCController : MonoBehaviour
     {
         body = GetComponent<Rigidbody2D>();
         body.freezeRotation = true;
+        movementConstraints = body.constraints;
         EnsureLayerMasks();
     }
 
     private void Reset()
     {
         EnsureLayerMasks();
+    }
+
+    private void OnDisable()
+    {
+        if (body != null && edgeSlipLockActive)
+        {
+            body.constraints = movementConstraints;
+            edgeSlipLockActive = false;
+        }
     }
 
     private void Update()
@@ -83,6 +100,7 @@ public class MCController : MonoBehaviour
         ApplyMovement();
         ApplyJump();
         ApplyExtraGravity();
+        ApplyIdleEdgeSlipLock();
     }
 
     public void SetInputLocked(bool locked)
@@ -165,6 +183,35 @@ public class MCController : MonoBehaviour
         }
 
         body.velocity = velocity;
+    }
+
+    private void ApplyIdleEdgeSlipLock()
+    {
+        bool shouldLock = ShouldLockIdleEdgeSlip();
+        if (edgeSlipLockActive == shouldLock)
+        {
+            return;
+        }
+
+        edgeSlipLockActive = shouldLock;
+        body.constraints = shouldLock
+            ? movementConstraints | RigidbodyConstraints2D.FreezePositionX
+            : movementConstraints;
+    }
+
+    private bool ShouldLockIdleEdgeSlip()
+    {
+        if (!preventIdleEdgeSlip || !IsGrounded)
+        {
+            return false;
+        }
+
+        if (Mathf.Abs(inputX) > idleEdgeSlipInputThreshold)
+        {
+            return false;
+        }
+
+        return Mathf.Abs(body.velocity.y) <= idleEdgeSlipMaxVerticalSpeed;
     }
 
     private void UpdateTimers()
