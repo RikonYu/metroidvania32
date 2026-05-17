@@ -3,6 +3,8 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody2D))]
 public class MCController : MonoBehaviour
 {
+    private const int MaxSupportContacts = 8;
+
     [Header("Movement")]
     [SerializeField] private float moveSpeed = 8f;
     [SerializeField] private float jumpVelocity = 14f;
@@ -17,16 +19,18 @@ public class MCController : MonoBehaviour
     [Header("Ground Check")]
     [SerializeField] private Vector2 groundCheckOffset = new Vector2(0f, -1.05f);
     [SerializeField] private Vector2 groundCheckSize = new Vector2(0.85f, 0.12f);
+    [SerializeField] private float groundContactMinNormalY = 0.2f;
     [SerializeField] private LayerMask movementGroundMask;
     [SerializeField] private LayerMask safeGroundMask;
 
     [Header("Edge Stability")]
     [SerializeField] private bool preventIdleEdgeSlip = true;
     [SerializeField] private float idleEdgeSlipInputThreshold = 0.01f;
-    [SerializeField] private float idleEdgeSlipMaxVerticalSpeed = 0.05f;
 
     private Rigidbody2D body;
     private RigidbodyConstraints2D movementConstraints;
+    private ContactFilter2D movementContactFilter;
+    private readonly ContactPoint2D[] supportContacts = new ContactPoint2D[MaxSupportContacts];
     private float inputX;
     private float coyoteCounter;
     private float jumpBufferCounter;
@@ -50,11 +54,20 @@ public class MCController : MonoBehaviour
         body.freezeRotation = true;
         movementConstraints = body.constraints;
         EnsureLayerMasks();
+        UpdateMovementContactFilter();
     }
 
     private void Reset()
     {
         EnsureLayerMasks();
+    }
+
+    private void OnValidate()
+    {
+        groundContactMinNormalY = Mathf.Clamp01(groundContactMinNormalY);
+        idleEdgeSlipInputThreshold = Mathf.Max(0f, idleEdgeSlipInputThreshold);
+        EnsureLayerMasks();
+        UpdateMovementContactFilter();
     }
 
     private void OnDisable()
@@ -211,7 +224,7 @@ public class MCController : MonoBehaviour
             return false;
         }
 
-        return Mathf.Abs(body.velocity.y) <= idleEdgeSlipMaxVerticalSpeed;
+        return true;
     }
 
     private void UpdateTimers()
@@ -232,8 +245,45 @@ public class MCController : MonoBehaviour
     {
         Vector2 center = (Vector2)transform.position + groundCheckOffset;
         currentGround = Physics2D.OverlapBox(center, groundCheckSize, 0f, movementGroundMask);
+        if (currentGround == null)
+        {
+            currentGround = FindSupportContactGround();
+        }
+
         IsGrounded = currentGround != null;
         IsOnSafeGround = IsGrounded && IsColliderOnMask(currentGround, safeGroundMask);
+    }
+
+    private Collider2D FindSupportContactGround()
+    {
+        if (body == null)
+        {
+            return null;
+        }
+
+        int contactCount = body.GetContacts(movementContactFilter, supportContacts);
+        float playerCenterY = transform.position.y;
+        for (int i = 0; i < contactCount; i++)
+        {
+            ContactPoint2D contact = supportContacts[i];
+            if (contact.point.y > playerCenterY)
+            {
+                continue;
+            }
+
+            if (Mathf.Abs(contact.normal.y) < groundContactMinNormalY)
+            {
+                continue;
+            }
+
+            Collider2D ground = GetGroundColliderFromContact(contact);
+            if (ground != null)
+            {
+                return ground;
+            }
+        }
+
+        return null;
     }
 
     private void SetFacingDirection(int facingDirection)
@@ -262,6 +312,27 @@ public class MCController : MonoBehaviour
         {
             safeGroundMask = LayerMask.GetMask(GameLayers.Ground);
         }
+    }
+
+    private void UpdateMovementContactFilter()
+    {
+        movementContactFilter.useTriggers = false;
+        movementContactFilter.SetLayerMask(movementGroundMask);
+    }
+
+    private Collider2D GetGroundColliderFromContact(ContactPoint2D contact)
+    {
+        if (IsColliderOnMask(contact.collider, movementGroundMask))
+        {
+            return contact.collider;
+        }
+
+        if (IsColliderOnMask(contact.otherCollider, movementGroundMask))
+        {
+            return contact.otherCollider;
+        }
+
+        return null;
     }
 
     private void OnDrawGizmosSelected()
