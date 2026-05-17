@@ -13,6 +13,7 @@ public class Bullet : MonoBehaviour
     [SerializeField] private BulletSource source = BulletSource.Player;
     [SerializeField] private Vector2 direction = Vector2.right;
     [SerializeField] private float speed = 16f;
+    [SerializeField] private int damage = 1;
 
     private Rigidbody2D body;
 
@@ -29,6 +30,11 @@ public class Bullet : MonoBehaviour
     public float Speed
     {
         get { return speed; }
+    }
+
+    public int Damage
+    {
+        get { return damage; }
     }
 
     private void Awake()
@@ -54,14 +60,21 @@ public class Bullet : MonoBehaviour
     {
         direction = NormalizeDirection(direction);
         speed = Mathf.Max(0f, speed);
+        damage = Mathf.Max(1, damage);
         ApplyLayer();
     }
 
     public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed)
     {
+        Configure(bulletSource, bulletDirection, bulletSpeed, damage);
+    }
+
+    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, int bulletDamage)
+    {
         source = bulletSource;
         direction = NormalizeDirection(bulletDirection);
         speed = Mathf.Max(0f, bulletSpeed);
+        damage = Mathf.Max(1, bulletDamage);
         ApplyLayer();
         ApplyVelocity();
     }
@@ -83,6 +96,7 @@ public class Bullet : MonoBehaviour
             return;
         }
 
+        ApplyHitEffect(other);
         Destroy(gameObject);
     }
 
@@ -134,6 +148,26 @@ public class Bullet : MonoBehaviour
         }
 
         return IsLayer(layer, GameLayers.Ground) || IsLayer(layer, GameLayers.Player);
+    }
+
+    private void ApplyHitEffect(Collider2D other)
+    {
+        if (source == BulletSource.Player)
+        {
+            EnemyController enemy = other.GetComponentInParent<EnemyController>();
+            if (enemy != null)
+            {
+                enemy.TakeDamage(damage);
+            }
+
+            return;
+        }
+
+        PlayerRespawn playerRespawn = other.GetComponentInParent<PlayerRespawn>();
+        if (playerRespawn != null)
+        {
+            playerRespawn.DieFromEnemy();
+        }
     }
 
     private static void ConfigureLayerCollisions()
