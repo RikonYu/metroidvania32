@@ -11,7 +11,7 @@ public enum BulletSource
 public class Bullet : MonoBehaviour
 {
     [SerializeField] private BulletSource source = BulletSource.Player;
-    [SerializeField] private int direction = GameDirection.Right;
+    [SerializeField] private Vector2 direction = Vector2.right;
     [SerializeField] private float speed = 16f;
 
     private Rigidbody2D body;
@@ -21,9 +21,9 @@ public class Bullet : MonoBehaviour
         get { return source; }
     }
 
-    public int Direction
+    public Vector2 Direction
     {
-        get { return GameDirection.NormalizeOrDefault(direction); }
+        get { return NormalizeDirection(direction); }
     }
 
     public float Speed
@@ -52,15 +52,15 @@ public class Bullet : MonoBehaviour
 
     private void OnValidate()
     {
-        direction = GameDirection.NormalizeOrDefault(direction);
+        direction = NormalizeDirection(direction);
         speed = Mathf.Max(0f, speed);
         ApplyLayer();
     }
 
-    public void Configure(BulletSource bulletSource, int bulletDirection, float bulletSpeed)
+    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed)
     {
         source = bulletSource;
-        direction = GameDirection.NormalizeOrDefault(bulletDirection);
+        direction = NormalizeDirection(bulletDirection);
         speed = Mathf.Max(0f, bulletSpeed);
         ApplyLayer();
         ApplyVelocity();
@@ -114,8 +114,7 @@ public class Bullet : MonoBehaviour
             return;
         }
 
-        Vector3 directionVector = GameDirection.ToVector3(direction);
-        body.velocity = new Vector2(directionVector.x, directionVector.y) * speed;
+        body.velocity = NormalizeDirection(direction) * speed;
     }
 
     private void ApplyLayer()
@@ -172,6 +171,16 @@ public class Bullet : MonoBehaviour
     private static bool IsLayer(int layer, string layerName)
     {
         return layer == LayerMask.NameToLayer(layerName);
+    }
+
+    private static Vector2 NormalizeDirection(Vector2 rawDirection)
+    {
+        if (rawDirection.sqrMagnitude <= 0.0001f)
+        {
+            return Vector2.right;
+        }
+
+        return rawDirection.normalized;
     }
 
     private static string GetBulletLayerName(BulletSource bulletSource)
