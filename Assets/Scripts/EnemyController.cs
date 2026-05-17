@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public enum EnemyMovementKind
 {
@@ -12,11 +14,12 @@ public class EnemyController : MonoBehaviour
 {
     [Header("Core")]
     [SerializeField] private EnemyMovementKind movementKind = EnemyMovementKind.Crawling;
+    [SerializeField] private bool isBoss;
     [SerializeField] private int maxHp = 3;
-    [SerializeField] private bool destroyOnDeath = true;
 
     [Header("Movement")]
     [SerializeField] private float moveSpeed = 3f;
+    [SerializeField] private List<Vector2> patrolPoints = new List<Vector2>();
 
     [Header("Attack")]
     [SerializeField] private Bullet bulletPrefab;
@@ -25,11 +28,17 @@ public class EnemyController : MonoBehaviour
     [SerializeField] private float bulletSpeed = 10f;
     [SerializeField] private float attackCooldown = 1f;
 
+    [Header("Melee Contact")]
+    [SerializeField] private float normalEnemyKnockbackDistance = 3f;
+    [SerializeField] private float knockbackDuration = 0.15f;
+
     private Rigidbody2D body;
+    private Vector3 spawnPosition;
     private float initialGravityScale = 1f;
     private float nextAttackTime;
     private int currentHp;
     private bool dead;
+    private bool initialized;
 
     public EnemyMovementKind MovementKind
     {
@@ -46,6 +55,11 @@ public class EnemyController : MonoBehaviour
         get { return maxHp; }
     }
 
+    public bool IsBoss
+    {
+        get { return isBoss; }
+    }
+
     public bool IsAlive
     {
         get { return !dead; }
@@ -56,12 +70,24 @@ public class EnemyController : MonoBehaviour
         get { return IsAlive && Time.time >= nextAttackTime; }
     }
 
+    public float ContactKnockbackDistance
+    {
+        get { return isBoss ? 0f : normalEnemyKnockbackDistance; }
+    }
+
+    public float KnockbackDuration
+    {
+        get { return knockbackDuration; }
+    }
+
+    public IReadOnlyList<Vector2> PatrolPoints
+    {
+        get { return patrolPoints; }
+    }
+
     private void Awake()
     {
-        CacheRigidbody();
-        currentHp = maxHp;
-        ApplyLayer();
-        ApplyMovementKindPhysics();
+        InitializeIfNeeded();
     }
 
     private void OnValidate()
@@ -70,6 +96,8 @@ public class EnemyController : MonoBehaviour
         moveSpeed = Mathf.Max(0f, moveSpeed);
         bulletSpeed = Mathf.Max(0f, bulletSpeed);
         attackCooldown = Mathf.Max(0f, attackCooldown);
+        normalEnemyKnockbackDistance = Mathf.Max(0f, normalEnemyKnockbackDistance);
+        knockbackDuration = Mathf.Max(0.01f, knockbackDuration);
         attackDirection = NormalizeDirection(attackDirection);
         ApplyLayer();
     }
@@ -159,13 +187,66 @@ public class EnemyController : MonoBehaviour
 
         dead = true;
         StopMoving();
-        if (destroyOnDeath)
+
+        if (isBoss)
         {
             Destroy(gameObject);
         }
         else
         {
             gameObject.SetActive(false);
+        }
+    }
+
+    public void Respawn()
+    {
+        if (isBoss)
+        {
+            return;
+        }
+
+        InitializeIfNeeded();
+        dead = false;
+        currentHp = maxHp;
+        transform.position = spawnPosition;
+        gameObject.SetActive(true);
+        ApplyLayer();
+        ApplyMovementKindPhysics();
+        StopMoving();
+    }
+
+    public void AddPatrolPoint(Vector2 worldPoint)
+    {
+        patrolPoints.Add(worldPoint);
+    }
+
+    public void SetPatrolPoint(int index, Vector2 worldPoint)
+    {
+        if (index < 0 || index >= patrolPoints.Count)
+        {
+            return;
+        }
+
+        patrolPoints[index] = worldPoint;
+    }
+
+    public void ClearPatrolPoints()
+    {
+        patrolPoints.Clear();
+    }
+
+    public static void RespawnNonBossEnemies()
+    {
+        EnemyController[] enemies = Resources.FindObjectsOfTypeAll<EnemyController>();
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            EnemyController enemy = enemies[i];
+            if (enemy == null || enemy.isBoss || !IsSceneInstance(enemy))
+            {
+                continue;
+            }
+
+            enemy.Respawn();
         }
     }
 
@@ -198,6 +279,21 @@ public class EnemyController : MonoBehaviour
             initialGravityScale = body.gravityScale;
             body.freezeRotation = true;
         }
+    }
+
+    private void InitializeIfNeeded()
+    {
+        if (initialized)
+        {
+            return;
+        }
+
+        CacheRigidbody();
+        spawnPosition = transform.position;
+        currentHp = maxHp;
+        initialized = true;
+        ApplyLayer();
+        ApplyMovementKindPhysics();
     }
 
     private void ApplyMovementKindPhysics()
@@ -237,5 +333,66 @@ public class EnemyController : MonoBehaviour
         }
 
         return rawDirection.normalized;
+    }
+
+    private void HandlePlayerContact(Collider2D other)
+    {
+        if (!IsAlive || other == null)
+        {
+            return;
+        }
+
+        PlayerRespawn playerRespawn = other.GetComponentInParent<PlayerRespawn>();
+        if (playerRespawn == null)
+        {
+            return;
+        }
+
+        Vector2 knockbackDirection = playerRespawn.transform.position - transform.position;
+        playerRespawn.TakeEnemyMeleeHit(this, knockbackDirection);
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        HandlePlayerContact(other);
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        HandlePlayerContact(other);
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        HandlePlayerContact(collision.collider);
+    }
+
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        HandlePlayerContact(collision.collider);
+    }
+
+    private static bool IsSceneInstance(EnemyController enemy)
+    {
+        Scene scene = enemy.gameObject.scene;
+        return scene.IsValid();
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = isBoss ? Color.red : Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, 0.5f);
+
+        Gizmos.color = Color.cyan;
+        for (int i = 0; i < patrolPoints.Count; i++)
+        {
+            Vector3 point = patrolPoints[i];
+            Gizmos.DrawWireSphere(point, 0.25f);
+
+            if (i > 0)
+            {
+                Gizmos.DrawLine(patrolPoints[i - 1], point);
+            }
+        }
     }
 }

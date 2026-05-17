@@ -9,6 +9,7 @@ public class PlayerRespawn : MonoBehaviour
     [SerializeField] private RoomManager roomManager;
     [SerializeField] private CamParent cameraRig;
     [SerializeField] private Checkpoint currentCheckpoint;
+    [SerializeField] private CampController currentCamp;
 
     [Header("Safe Ground")]
     [SerializeField] private float safeRecordInterval = 0.15f;
@@ -17,6 +18,8 @@ public class PlayerRespawn : MonoBehaviour
     [Header("Death")]
     [SerializeField] private float respawnInputLock = 0.15f;
     [SerializeField] private float invulnerabilityDuration = 0.5f;
+    [SerializeField] private float hitInvulnerabilityDuration = 0.75f;
+    [SerializeField] private float hitFlashInterval = 0.08f;
     [SerializeField] private LayerMask hazardMask;
     [SerializeField] private LayerMask enemyMask;
 
@@ -27,6 +30,9 @@ public class PlayerRespawn : MonoBehaviour
     private bool hasSafePosition;
     private bool isRespawning;
     private float invulnerableUntil;
+    private Coroutine flashRoutine;
+    private Coroutine knockbackRoutine;
+    private SpriteRenderer[] spriteRenderers;
 
     public bool IsInvulnerable
     {
@@ -52,6 +58,7 @@ public class PlayerRespawn : MonoBehaviour
     {
         CacheReferences();
         EnsureLayerMasks();
+        CacheSpriteRenderers();
         RecordSafeGround(true);
     }
 
@@ -71,7 +78,19 @@ public class PlayerRespawn : MonoBehaviour
         if (checkpoint != null)
         {
             currentCheckpoint = checkpoint;
+            currentCamp = null;
         }
+    }
+
+    public void SetCamp(CampController camp)
+    {
+        if (camp == null)
+        {
+            return;
+        }
+
+        currentCamp = camp;
+        currentCheckpoint = null;
     }
 
     public void DieFromHazard()
@@ -86,7 +105,7 @@ public class PlayerRespawn : MonoBehaviour
             RecordSafeGround(true);
         }
 
-        StartCoroutine(RespawnRoutine(lastSafeRoom, lastSafePosition, GameDirection.NormalizeOrDefault(lastSafeFacing)));
+        StartCoroutine(RespawnRoutine(lastSafeRoom, lastSafePosition, GameDirection.NormalizeOrDefault(lastSafeFacing), false));
     }
 
     public void DieFromEnemy()
@@ -96,16 +115,38 @@ public class PlayerRespawn : MonoBehaviour
             return;
         }
 
+        if (currentCamp != null)
+        {
+            StartCoroutine(RespawnRoutine(currentCamp.Room, currentCamp.RespawnPosition, currentCamp.FacingDirection, true));
+            return;
+        }
+
         if (currentCheckpoint != null)
         {
-            StartCoroutine(RespawnRoutine(currentCheckpoint.Room, currentCheckpoint.transform.position, currentCheckpoint.FacingDirection));
+            StartCoroutine(RespawnRoutine(currentCheckpoint.Room, currentCheckpoint.transform.position, currentCheckpoint.FacingDirection, false));
             return;
         }
 
         DieFromHazard();
     }
 
-    private IEnumerator RespawnRoutine(Room targetRoom, Vector3 targetPosition, int facingDirection)
+    public void TakeEnemyMeleeHit(EnemyController enemy, Vector2 knockbackDirection)
+    {
+        if (enemy == null || IsInvulnerable || isRespawning)
+        {
+            return;
+        }
+
+        StartInvulnerability(hitInvulnerabilityDuration);
+
+        float distance = enemy.ContactKnockbackDistance;
+        if (distance > 0f)
+        {
+            StartKnockback(knockbackDirection, distance, enemy.KnockbackDuration);
+        }
+    }
+
+    private IEnumerator RespawnRoutine(Room targetRoom, Vector3 targetPosition, int facingDirection, bool reviveEnemies)
     {
         isRespawning = true;
         player.SetInputLocked(true);
@@ -118,12 +159,17 @@ public class PlayerRespawn : MonoBehaviour
 
         player.TeleportTo(targetPosition, GameDirection.NormalizeOrDefault(facingDirection));
 
+        if (reviveEnemies)
+        {
+            EnemyController.RespawnNonBossEnemies();
+        }
+
         if (cameraRig != null)
         {
             cameraRig.HardCutToTarget();
         }
 
-        invulnerableUntil = Time.time + invulnerabilityDuration;
+        StartInvulnerability(invulnerabilityDuration);
 
         if (respawnInputLock > 0f)
         {
@@ -191,7 +237,12 @@ public class PlayerRespawn : MonoBehaviour
 
         if (IsLayerInMask(other.gameObject.layer, enemyMask))
         {
-            DieFromEnemy();
+            EnemyController enemy = other.GetComponentInParent<EnemyController>();
+            if (enemy != null)
+            {
+                Vector2 knockbackDirection = transform.position - enemy.transform.position;
+                TakeEnemyMeleeHit(enemy, knockbackDirection);
+            }
         }
     }
 
@@ -213,6 +264,11 @@ public class PlayerRespawn : MonoBehaviour
         }
     }
 
+    private void CacheSpriteRenderers()
+    {
+        spriteRenderers = GetComponentsInChildren<SpriteRenderer>(true);
+    }
+
     private void EnsureLayerMasks()
     {
         if (hazardMask == 0)
@@ -229,6 +285,75 @@ public class PlayerRespawn : MonoBehaviour
     private static bool IsLayerInMask(int layer, LayerMask mask)
     {
         return (mask.value & (1 << layer)) != 0;
+    }
+
+    private void StartInvulnerability(float duration)
+    {
+        invulnerableUntil = Time.time + Mathf.Max(0f, duration);
+        if (flashRoutine != null)
+        {
+            StopCoroutine(flashRoutine);
+        }
+
+        flashRoutine = StartCoroutine(FlashRoutine(duration));
+    }
+
+    private void StartKnockback(Vector2 rawDirection, float distance, float duration)
+    {
+        if (knockbackRoutine != null)
+        {
+            StopCoroutine(knockbackRoutine);
+        }
+
+        knockbackRoutine = StartCoroutine(KnockbackRoutine(rawDirection, distance, duration));
+    }
+
+    private IEnumerator KnockbackRoutine(Vector2 rawDirection, float distance, float duration)
+    {
+        Vector2 direction = rawDirection.sqrMagnitude > 0.0001f ? rawDirection.normalized : Vector2.right;
+        float safeDuration = Mathf.Max(0.01f, duration);
+        player.SetInputLocked(true);
+        player.SetVelocity(direction * (distance / safeDuration));
+        yield return new WaitForSeconds(safeDuration);
+        player.ClearVelocity();
+        player.SetInputLocked(false);
+        knockbackRoutine = null;
+    }
+
+    private IEnumerator FlashRoutine(float duration)
+    {
+        if (spriteRenderers == null || spriteRenderers.Length == 0)
+        {
+            CacheSpriteRenderers();
+        }
+
+        float endTime = Time.time + Mathf.Max(0f, duration);
+        bool visible = true;
+        while (Time.time < endTime)
+        {
+            visible = !visible;
+            SetSpriteRenderersVisible(visible);
+            yield return new WaitForSeconds(Mathf.Max(0.01f, hitFlashInterval));
+        }
+
+        SetSpriteRenderersVisible(true);
+        flashRoutine = null;
+    }
+
+    private void SetSpriteRenderersVisible(bool visible)
+    {
+        if (spriteRenderers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < spriteRenderers.Length; i++)
+        {
+            if (spriteRenderers[i] != null)
+            {
+                spriteRenderers[i].enabled = visible;
+            }
+        }
     }
 
     private void OnDrawGizmosSelected()
