@@ -246,6 +246,7 @@ public class Room : MonoBehaviour
 
         for (int i = 0; i < exits.Count; i++)
         {
+            exits[i].side = GameDirection.NormalizeRoomExitSide(exits[i].side);
             exits[i].index = Mathf.Max(0, exits[i].index);
             exits[i].length = Mathf.Max(0.1f, exits[i].length);
         }

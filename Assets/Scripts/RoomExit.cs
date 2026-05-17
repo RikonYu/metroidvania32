@@ -3,17 +3,17 @@ using UnityEngine;
 
 public enum RoomExitSide
 {
-    Left,
-    Right,
-    Up,
-    Down
+    Down = GameDirection.Down,
+    Left = GameDirection.Left,
+    Right = GameDirection.Right,
+    Up = GameDirection.Up
 }
 
 [Serializable]
 public class RoomExit
 {
     public string exitId = "";
-    public RoomExitSide side;
+    public RoomExitSide side = RoomExitSide.Right;
     public int index;
     public float offset;
     public float length = 2f;

@@ -3,7 +3,7 @@ using UnityEngine;
 public class Checkpoint : MonoBehaviour
 {
     [SerializeField] private Room room;
-    [SerializeField] private int facingDirection = 1;
+    [SerializeField] private int facingDirection = GameDirection.Right;
     [SerializeField] private bool activateOnPlayerTouch = true;
     [SerializeField] private bool drawGizmos = true;
 
@@ -22,12 +22,17 @@ public class Checkpoint : MonoBehaviour
 
     public int FacingDirection
     {
-        get { return facingDirection >= 0 ? 1 : -1; }
+        get { return GameDirection.NormalizeOrDefault(facingDirection); }
+    }
+
+    private void Awake()
+    {
+        NormalizeFacingDirection();
     }
 
     private void OnValidate()
     {
-        facingDirection = facingDirection >= 0 ? 1 : -1;
+        NormalizeFacingDirection();
         if (room == null)
         {
             room = GetComponentInParent<Room>();
@@ -57,6 +62,11 @@ public class Checkpoint : MonoBehaviour
 
         Gizmos.color = Color.white;
         Gizmos.DrawWireCube(transform.position, new Vector3(1f, 2f, 0f));
-        Gizmos.DrawLine(transform.position, transform.position + Vector3.right * FacingDirection);
+        Gizmos.DrawLine(transform.position, transform.position + GameDirection.ToVector3(FacingDirection));
+    }
+
+    private void NormalizeFacingDirection()
+    {
+        facingDirection = GameDirection.NormalizeOrDefault(facingDirection);
     }
 }

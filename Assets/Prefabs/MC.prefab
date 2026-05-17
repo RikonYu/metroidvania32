@@ -55,12 +55,15 @@ MonoBehaviour:
   lowJumpGravityMultiplier: 2.2
   groundCheckOffset: {x: 0, y: -1.05}
   groundCheckSize: {x: 0.85, y: 0.12}
+  groundContactMinNormalY: 0.2
   movementGroundMask:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 2560
   safeGroundMask:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 512
+  preventIdleEdgeSlip: 1
+  idleEdgeSlipInputThreshold: 0.01
 --- !u!50 &6017983103798632942
 Rigidbody2D:
   serializedVersion: 4
@@ -154,7 +157,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 10
   m_Sprite: {fileID: 7482667652216324306, guid: 311925a002f4447b3a28927169b83ea6, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

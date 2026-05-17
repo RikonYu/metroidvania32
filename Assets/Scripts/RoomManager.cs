@@ -275,8 +275,33 @@ public class RoomManager : MonoBehaviour
         }
 
         Vector3 targetPosition = GetCoordinateTransitionPosition(side, targetRoom.WorldRect, playerBounds, player.transform.position);
-        int facingDirection = side == RoomExitSide.Left ? -1 : side == RoomExitSide.Right ? 1 : player.FacingDirection;
+        int facingDirection = GetFacingDirectionForExitSide(side, player.FacingDirection);
         StartCoroutine(CoordinateTransitionRoutine(targetRoom, targetPosition, facingDirection));
+    }
+
+    private int GetFacingDirectionForExitSide(RoomExitSide side, int fallbackDirection)
+    {
+        if (side == RoomExitSide.Left)
+        {
+            return GameDirection.Left;
+        }
+
+        if (side == RoomExitSide.Right)
+        {
+            return GameDirection.Right;
+        }
+
+        if (side == RoomExitSide.Up)
+        {
+            return GameDirection.Up;
+        }
+
+        if (side == RoomExitSide.Down)
+        {
+            return GameDirection.Down;
+        }
+
+        return GameDirection.NormalizeOrDefault(fallbackDirection);
     }
 
     private Room FindAdjacentRoom(Room sourceRoom, RoomExitSide side, Bounds playerBounds)

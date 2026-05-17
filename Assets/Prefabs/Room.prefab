@@ -112,7 +112,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: -10
   m_ChunkSize: {x: 32, y: 32, z: 32}
   m_ChunkCullingBounds: {x: 0, y: 0, z: 0}
   m_MaxChunkCount: 16
@@ -281,3 +281,4 @@ MonoBehaviour:
   gizmoColor: {r: 0.2, g: 0.7, b: 1, a: 1}
   drawGizmos: 1
   warnOnOverlap: 1
+  groundTilemap: {fileID: 3839410372487321600}

@@ -35,10 +35,10 @@ public static class MvpTestSceneBuilder
         Room roomB = CreateRoom(root.transform, "Room_B", new Vector3(32f, 0f, 0f), new Vector2Int(1, 1));
         Room roomC = CreateRoom(root.transform, "Room_C", new Vector3(32f, 16f, 0f), new Vector2Int(1, 1));
 
-        CreateSpawn(roomA.transform, "start", new Vector3(4f, 2f, 0f), 1);
-        CreateSpawn(roomA.transform, "from_right", new Vector3(30f, 2f, 0f), -1);
-        CreateSpawn(roomB.transform, "from_left_lower", new Vector3(34f, 2f, 0f), 1);
-        CreateSpawn(roomC.transform, "from_left_upper", new Vector3(34f, 18f, 0f), 1);
+        CreateSpawn(roomA.transform, "start", new Vector3(4f, 2f, 0f), GameDirection.Right);
+        CreateSpawn(roomA.transform, "from_right", new Vector3(30f, 2f, 0f), GameDirection.Left);
+        CreateSpawn(roomB.transform, "from_left_lower", new Vector3(34f, 2f, 0f), GameDirection.Right);
+        CreateSpawn(roomC.transform, "from_left_upper", new Vector3(34f, 18f, 0f), GameDirection.Right);
 
         roomA.ConfigureForEditor("Room_A", new Vector2Int(1, 2), new List<RoomExit>());
         roomB.ConfigureForEditor("Room_B", new Vector2Int(1, 1), new List<RoomExit>());
@@ -110,7 +110,7 @@ public static class MvpTestSceneBuilder
 
         SerializedObject spawnObjectSerialized = new SerializedObject(spawnPoint);
         spawnObjectSerialized.FindProperty("spawnId").stringValue = spawnId;
-        spawnObjectSerialized.FindProperty("facingDirection").intValue = facingDirection;
+        spawnObjectSerialized.FindProperty("facingDirection").intValue = GameDirection.NormalizeOrDefault(facingDirection);
         spawnObjectSerialized.ApplyModifiedPropertiesWithoutUndo();
     }
 

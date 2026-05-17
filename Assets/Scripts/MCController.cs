@@ -41,7 +41,7 @@ public class MCController : MonoBehaviour
 
     public bool IsGrounded { get; private set; }
     public bool IsOnSafeGround { get; private set; }
-    public int FacingDirection { get; private set; } = 1;
+    public int FacingDirection { get; private set; } = GameDirection.Right;
 
     public Vector2 Velocity
     {
@@ -98,11 +98,11 @@ public class MCController : MonoBehaviour
 
         if (inputX > 0.01f)
         {
-            FacingDirection = 1;
+            FacingDirection = GameDirection.Right;
         }
         else if (inputX < -0.01f)
         {
-            FacingDirection = -1;
+            FacingDirection = GameDirection.Left;
         }
     }
 
@@ -288,12 +288,7 @@ public class MCController : MonoBehaviour
 
     private void SetFacingDirection(int facingDirection)
     {
-        if (facingDirection == 0)
-        {
-            return;
-        }
-
-        FacingDirection = facingDirection > 0 ? 1 : -1;
+        FacingDirection = GameDirection.NormalizeOrDefault(facingDirection, FacingDirection);
     }
 
     private static bool IsColliderOnMask(Collider2D collider2D, LayerMask mask)

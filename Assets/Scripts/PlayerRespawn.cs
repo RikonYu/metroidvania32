@@ -22,7 +22,7 @@ public class PlayerRespawn : MonoBehaviour
 
     private Room lastSafeRoom;
     private Vector3 lastSafePosition;
-    private int lastSafeFacing = 1;
+    private int lastSafeFacing = GameDirection.Right;
     private float nextSafeRecordTime;
     private bool hasSafePosition;
     private bool isRespawning;
@@ -86,7 +86,7 @@ public class PlayerRespawn : MonoBehaviour
             RecordSafeGround(true);
         }
 
-        StartCoroutine(RespawnRoutine(lastSafeRoom, lastSafePosition, lastSafeFacing));
+        StartCoroutine(RespawnRoutine(lastSafeRoom, lastSafePosition, GameDirection.NormalizeOrDefault(lastSafeFacing)));
     }
 
     public void DieFromEnemy()
@@ -116,7 +116,7 @@ public class PlayerRespawn : MonoBehaviour
             roomManager.SetActiveRoom(targetRoom);
         }
 
-        player.TeleportTo(targetPosition, facingDirection);
+        player.TeleportTo(targetPosition, GameDirection.NormalizeOrDefault(facingDirection));
 
         if (cameraRig != null)
         {
