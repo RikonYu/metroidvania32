@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -18,6 +19,7 @@ public class Room : MonoBehaviour
     [SerializeField] private Color gizmoColor = new Color(0.2f, 0.7f, 1f, 1f);
     [SerializeField] private bool drawGizmos = true;
     [SerializeField] private bool warnOnOverlap = true;
+    [SerializeField] private Tilemap groundTilemap;
 
     private readonly List<RoomExitTrigger> runtimeExitTriggers = new List<RoomExitTrigger>();
 
@@ -71,6 +73,14 @@ public class Room : MonoBehaviour
         get { return exits; }
     }
 
+    public Tilemap GroundTilemap
+    {
+        get
+        {
+            return groundTilemap != null ? groundTilemap : FindGroundTilemap();
+        }
+    }
+
     private void Reset()
     {
         if (string.IsNullOrWhiteSpace(roomId))
@@ -78,12 +88,18 @@ public class Room : MonoBehaviour
             roomId = gameObject.name;
         }
 
+        groundTilemap = FindGroundTilemap();
         SnapToGridInEditor();
     }
 
     private void OnValidate()
     {
         SanitizeSize();
+
+        if (groundTilemap == null)
+        {
+            groundTilemap = FindGroundTilemap();
+        }
 
         if (!Application.isPlaying)
         {
@@ -256,6 +272,21 @@ public class Room : MonoBehaviour
         }
 
         runtimeExitTriggers.Clear();
+    }
+
+    private Tilemap FindGroundTilemap()
+    {
+        Transform groundTileRoot = transform.Find("GroundTile");
+        if (groundTileRoot != null)
+        {
+            Tilemap tilemap = groundTileRoot.GetComponentInChildren<Tilemap>(true);
+            if (tilemap != null)
+            {
+                return tilemap;
+            }
+        }
+
+        return GetComponentInChildren<Tilemap>(true);
     }
 
     private static bool RectsOverlapByArea(Rect a, Rect b)
