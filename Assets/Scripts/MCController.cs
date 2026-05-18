@@ -183,6 +183,7 @@ public class MCController : MonoBehaviour
             return;
         }
 
+        ApplyWorldGravityScale();
         UpdateTimers();
         ApplyMovement();
         ApplyJump();
@@ -240,7 +241,7 @@ public class MCController : MonoBehaviour
             currentMoveSpeed *= fullChargeGroundMoveSpeedMultiplier;
         }
 
-        velocity.x = inputX * currentMoveSpeed;
+        velocity.x = inputX * currentMoveSpeed * GameTime.WorldScale;
         body.velocity = velocity;
     }
 
@@ -252,7 +253,7 @@ public class MCController : MonoBehaviour
         }
 
         Vector2 velocity = body.velocity;
-        velocity.y = jumpVelocity;
+        velocity.y = jumpVelocity * GameTime.WorldScale;
         body.velocity = velocity;
         jumpBufferCounter = 0f;
         coyoteCounter = 0f;
@@ -265,16 +266,17 @@ public class MCController : MonoBehaviour
         Vector2 velocity = body.velocity;
         if (velocity.y < 0f)
         {
-            velocity += Physics2D.gravity * ((fallGravityMultiplier - 1f) * Time.fixedDeltaTime);
+            velocity += Physics2D.gravity * ((fallGravityMultiplier - 1f) * GameTime.FixedDeltaTime);
         }
         else if (velocity.y > 0f && !jumpHeld)
         {
-            velocity += Physics2D.gravity * ((lowJumpGravityMultiplier - 1f) * Time.fixedDeltaTime);
+            velocity += Physics2D.gravity * ((lowJumpGravityMultiplier - 1f) * GameTime.FixedDeltaTime);
         }
 
-        if (velocity.y < -maxFallSpeed)
+        float currentMaxFallSpeed = maxFallSpeed * GameTime.WorldScale;
+        if (velocity.y < -currentMaxFallSpeed)
         {
-            velocity.y = -maxFallSpeed;
+            velocity.y = -currentMaxFallSpeed;
         }
 
         body.velocity = velocity;
@@ -493,7 +495,7 @@ public class MCController : MonoBehaviour
 
     private void ApplyDash()
     {
-        dashTimeRemaining -= Time.fixedDeltaTime;
+        dashTimeRemaining -= GameTime.FixedDeltaTime;
         body.velocity = new Vector2(GetDashSpeed() * dashDirection, 0f);
 
         if (dashTimeRemaining <= 0f)
@@ -504,7 +506,7 @@ public class MCController : MonoBehaviour
 
     private void ApplyDashRecoil()
     {
-        dashRecoilTimeRemaining -= Time.fixedDeltaTime;
+        dashRecoilTimeRemaining -= GameTime.FixedDeltaTime;
         body.velocity = new Vector2(GetDashRecoilSpeed() * -dashDirection, 0f);
 
         if (dashRecoilTimeRemaining <= 0f)
@@ -566,12 +568,12 @@ public class MCController : MonoBehaviour
 
     private float GetDashSpeed()
     {
-        return dashDistance / Mathf.Max(0.01f, dashDuration);
+        return (dashDistance / Mathf.Max(0.01f, dashDuration)) * GameTime.WorldScale;
     }
 
     private float GetDashRecoilSpeed()
     {
-        return dashRecoilDistance / Mathf.Max(0.01f, dashRecoilDuration);
+        return (dashRecoilDistance / Mathf.Max(0.01f, dashRecoilDuration)) * GameTime.WorldScale;
     }
 
     private void SetDashGravity()
@@ -581,7 +583,12 @@ public class MCController : MonoBehaviour
 
     private void RestoreGravity()
     {
-        body.gravityScale = defaultGravityScale;
+        ApplyWorldGravityScale();
+    }
+
+    private void ApplyWorldGravityScale()
+    {
+        body.gravityScale = defaultGravityScale * GameTime.WorldScale;
     }
 
     private void UpdateGroundedState()
