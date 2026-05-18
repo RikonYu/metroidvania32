@@ -3,6 +3,8 @@ using UnityEngine;
 [RequireComponent(typeof(Collider2D))]
 public class WaterZone : MonoBehaviour
 {
+    private static readonly System.Collections.Generic.List<WaterZone> ActiveZones = new System.Collections.Generic.List<WaterZone>();
+
     [Header("Player Swim")]
     [SerializeField] private float playerHorizontalSwimSpeed = 5f;
     [SerializeField] private float playerVerticalSwimSpeed = 4.5f;
@@ -27,9 +29,57 @@ public class WaterZone : MonoBehaviour
     public float BulletDrag { get { return bulletDrag; } }
     public bool KillNonUnderwaterEnemies { get { return killNonUnderwaterEnemies; } }
 
+    private Collider2D waterCollider;
+
+    public static WaterZone GetZoneAtPoint(Vector2 worldPoint)
+    {
+        for (int i = ActiveZones.Count - 1; i >= 0; i--)
+        {
+            WaterZone waterZone = ActiveZones[i];
+            if (waterZone == null)
+            {
+                ActiveZones.RemoveAt(i);
+                continue;
+            }
+
+            if (waterZone.ContainsPoint(worldPoint))
+            {
+                return waterZone;
+            }
+        }
+
+        return null;
+    }
+
+    private void Awake()
+    {
+        CacheCollider();
+        EnsureTriggerCollider();
+        ApplyWaterLayer();
+    }
+
+    private void OnEnable()
+    {
+        if (!ActiveZones.Contains(this))
+        {
+            ActiveZones.Add(this);
+        }
+
+        CacheCollider();
+        EnsureTriggerCollider();
+        ApplyWaterLayer();
+    }
+
+    private void OnDisable()
+    {
+        ActiveZones.Remove(this);
+    }
+
     private void Reset()
     {
+        CacheCollider();
         EnsureTriggerCollider();
+        ApplyWaterLayer();
     }
 
     private void OnValidate()
@@ -40,29 +90,55 @@ public class WaterZone : MonoBehaviour
         playerSwimDeceleration = Mathf.Max(0f, playerSwimDeceleration);
         waterExitBoost = Mathf.Max(0f, waterExitBoost);
         bulletDrag = Mathf.Max(0f, bulletDrag);
+        CacheCollider();
         EnsureTriggerCollider();
+        ApplyWaterLayerAfterValidation();
     }
 
     private void EnsureTriggerCollider()
     {
-        Collider2D collider2D = GetComponent<Collider2D>();
-        if (collider2D != null)
+        CacheCollider();
+        if (waterCollider != null)
         {
-            collider2D.isTrigger = true;
+            waterCollider.isTrigger = true;
         }
+    }
+
+    private void ApplyWaterLayer()
+    {
+        GameLayers.ApplyTo(gameObject, GameLayers.Water);
+    }
+
+    private void ApplyWaterLayerAfterValidation()
+    {
+        GameLayers.ApplyToAfterValidation(gameObject, GameLayers.Water);
+    }
+
+    private void CacheCollider()
+    {
+        if (waterCollider == null)
+        {
+            waterCollider = GetComponent<Collider2D>();
+        }
+    }
+
+    private bool ContainsPoint(Vector2 worldPoint)
+    {
+        CacheCollider();
+        return waterCollider != null && waterCollider.OverlapPoint(worldPoint);
     }
 
     private void OnDrawGizmos()
     {
-        Collider2D collider2D = GetComponent<Collider2D>();
-        if (collider2D == null)
+        CacheCollider();
+        if (waterCollider == null)
         {
             return;
         }
 
         Gizmos.color = gizmoColor;
-        Gizmos.DrawCube(collider2D.bounds.center, collider2D.bounds.size);
+        Gizmos.DrawCube(waterCollider.bounds.center, waterCollider.bounds.size);
         Gizmos.color = new Color(gizmoColor.r, gizmoColor.g, gizmoColor.b, 0.85f);
-        Gizmos.DrawWireCube(collider2D.bounds.center, collider2D.bounds.size);
+        Gizmos.DrawWireCube(waterCollider.bounds.center, waterCollider.bounds.size);
     }
 }

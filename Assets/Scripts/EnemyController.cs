@@ -110,7 +110,7 @@ public class EnemyController : MonoBehaviour
         normalEnemyKnockbackDistance = Mathf.Max(0f, normalEnemyKnockbackDistance);
         knockbackDuration = Mathf.Max(0.01f, knockbackDuration);
         attackDirection = NormalizeDirection(attackDirection);
-        ApplyLayer();
+        ApplyLayerAfterValidation();
     }
 
     public void Move(Vector2 moveInput)
@@ -320,11 +320,12 @@ public class EnemyController : MonoBehaviour
 
     private void ApplyLayer()
     {
-        int enemyLayer = LayerMask.NameToLayer(GameLayers.Enemy);
-        if (enemyLayer >= 0)
-        {
-            gameObject.layer = enemyLayer;
-        }
+        GameLayers.ApplyTo(gameObject, GameLayers.Enemy);
+    }
+
+    private void ApplyLayerAfterValidation()
+    {
+        GameLayers.ApplyToAfterValidation(gameObject, GameLayers.Enemy);
     }
 
     private static Vector2 NormalizeMovementInput(Vector2 moveInput)

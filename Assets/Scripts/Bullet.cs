@@ -90,7 +90,7 @@ public class Bullet : MonoBehaviour
         damage = Mathf.Max(1, damage);
         hyperbolicGravityScale = Mathf.Max(0f, hyperbolicGravityScale);
         ConfigurePhysics();
-        ApplyLayer();
+        ApplyLayerAfterValidation();
     }
 
     public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed)
@@ -219,6 +219,8 @@ public class Bullet : MonoBehaviour
             return;
         }
 
+        RefreshWaterZone();
+
         if (isHyperbolic)
         {
             worldVelocity += Physics2D.gravity * (hyperbolicGravityScale * GameTime.FixedDeltaTime);
@@ -243,6 +245,27 @@ public class Bullet : MonoBehaviour
         body.velocity = worldVelocity * GameTime.WorldScale;
     }
 
+    private void RefreshWaterZone()
+    {
+        Vector2 position = body != null ? body.position : (Vector2)transform.position;
+        WaterZone positionWaterZone = WaterZone.GetZoneAtPoint(position);
+        if (positionWaterZone != null)
+        {
+            EnterWater(positionWaterZone);
+            return;
+        }
+
+        for (int i = waterZones.Count - 1; i >= 0; i--)
+        {
+            if (waterZones[i] == null || !waterZones[i].isActiveAndEnabled)
+            {
+                waterZones.RemoveAt(i);
+            }
+        }
+
+        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+    }
+
     private void FaceVelocity()
     {
         CacheRigidbody();
@@ -258,11 +281,12 @@ public class Bullet : MonoBehaviour
 
     private void ApplyLayer()
     {
-        int layer = LayerMask.NameToLayer(GetBulletLayerName(source));
-        if (layer >= 0 && gameObject.layer != layer)
-        {
-            gameObject.layer = layer;
-        }
+        GameLayers.ApplyTo(gameObject, GetBulletLayerName(source));
+    }
+
+    private void ApplyLayerAfterValidation()
+    {
+        GameLayers.ApplyToAfterValidation(gameObject, GetBulletLayerName(source));
     }
 
     private bool ShouldDestroyOnLayer(int layer)
