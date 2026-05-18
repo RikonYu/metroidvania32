@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 7766801322008129028}
   - component: {fileID: 7766801322008129029}
   m_Layer: 12
-  m_Name: Square
+  m_Name: camp
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

@@ -137,6 +137,11 @@ public class PlayerRespawn : MonoBehaviour
             return;
         }
 
+        if (player != null && player.IsDashActive)
+        {
+            return;
+        }
+
         StartInvulnerability(hitInvulnerabilityDuration);
 
         float distance = enemy.ContactKnockbackDistance;

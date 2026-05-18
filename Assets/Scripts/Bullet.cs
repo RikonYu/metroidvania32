@@ -14,8 +14,12 @@ public class Bullet : MonoBehaviour
     [SerializeField] private Vector2 direction = Vector2.right;
     [SerializeField] private float speed = 16f;
     [SerializeField] private int damage = 1;
+    [SerializeField] private bool isHyperbolic;
+    [SerializeField] private float hyperbolicGravityScale = 1f;
+    [SerializeField] private bool isPiercing;
 
     private Rigidbody2D body;
+    private Vector2 worldVelocity;
 
     public BulletSource Source
     {
@@ -37,23 +41,37 @@ public class Bullet : MonoBehaviour
         get { return damage; }
     }
 
+    public bool IsHyperbolic
+    {
+        get { return isHyperbolic; }
+    }
+
+    public bool IsPiercing
+    {
+        get { return isPiercing; }
+    }
+
     private void Awake()
     {
         CacheRigidbody();
         ConfigurePhysics();
         ApplyLayer();
-        ApplyVelocity();
+        ResetVelocity();
+        FaceVelocity();
     }
 
     private void OnEnable()
     {
+        ConfigurePhysics();
         ApplyLayer();
-        ApplyVelocity();
+        ResetVelocity();
+        FaceVelocity();
     }
 
     private void FixedUpdate()
     {
-        ApplyVelocity();
+        StepVelocity();
+        FaceVelocity();
     }
 
     private void OnValidate()
@@ -61,6 +79,8 @@ public class Bullet : MonoBehaviour
         direction = NormalizeDirection(direction);
         speed = Mathf.Max(0f, speed);
         damage = Mathf.Max(1, damage);
+        hyperbolicGravityScale = Mathf.Max(0f, hyperbolicGravityScale);
+        ConfigurePhysics();
         ApplyLayer();
     }
 
@@ -71,12 +91,31 @@ public class Bullet : MonoBehaviour
 
     public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, int bulletDamage)
     {
+        Configure(bulletSource, bulletDirection, bulletSpeed, bulletDamage, isHyperbolic, isPiercing);
+    }
+
+    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, bool bulletIsHyperbolic)
+    {
+        Configure(bulletSource, bulletDirection, bulletSpeed, damage, bulletIsHyperbolic, isPiercing);
+    }
+
+    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, int bulletDamage, bool bulletIsHyperbolic)
+    {
+        Configure(bulletSource, bulletDirection, bulletSpeed, bulletDamage, bulletIsHyperbolic, isPiercing);
+    }
+
+    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, int bulletDamage, bool bulletIsHyperbolic, bool bulletIsPiercing)
+    {
         source = bulletSource;
         direction = NormalizeDirection(bulletDirection);
         speed = Mathf.Max(0f, bulletSpeed);
         damage = Mathf.Max(1, bulletDamage);
+        isHyperbolic = bulletIsHyperbolic;
+        isPiercing = bulletIsPiercing;
+        ConfigurePhysics();
         ApplyLayer();
-        ApplyVelocity();
+        ResetVelocity();
+        FaceVelocity();
     }
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -96,8 +135,28 @@ public class Bullet : MonoBehaviour
             return;
         }
 
+        if (ShouldIgnoreDashingPlayer(other))
+        {
+            return;
+        }
+
         ApplyHitEffect(other);
+        if (ShouldPierceTarget(other))
+        {
+            IgnoreCollisionWith(other);
+            return;
+        }
+
         Destroy(gameObject);
+    }
+
+    private void IgnoreCollisionWith(Collider2D other)
+    {
+        Collider2D bulletCollider = GetComponent<Collider2D>();
+        if (bulletCollider != null && other != null)
+        {
+            Physics2D.IgnoreCollision(bulletCollider, other, true);
+        }
     }
 
     private void CacheRigidbody()
@@ -120,7 +179,7 @@ public class Bullet : MonoBehaviour
         ConfigureLayerCollisions();
     }
 
-    private void ApplyVelocity()
+    private void ResetVelocity()
     {
         CacheRigidbody();
         if (body == null)
@@ -128,7 +187,46 @@ public class Bullet : MonoBehaviour
             return;
         }
 
-        body.velocity = NormalizeDirection(direction) * speed;
+        worldVelocity = NormalizeDirection(direction) * speed;
+        ApplyBodyVelocity();
+    }
+
+    private void StepVelocity()
+    {
+        CacheRigidbody();
+        if (body == null)
+        {
+            return;
+        }
+
+        if (isHyperbolic)
+        {
+            worldVelocity += Physics2D.gravity * (hyperbolicGravityScale * GameTime.FixedDeltaTime);
+        }
+        else
+        {
+            worldVelocity = NormalizeDirection(direction) * speed;
+        }
+
+        ApplyBodyVelocity();
+    }
+
+    private void ApplyBodyVelocity()
+    {
+        body.velocity = worldVelocity * GameTime.WorldScale;
+    }
+
+    private void FaceVelocity()
+    {
+        CacheRigidbody();
+        if (body == null || body.velocity.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        Vector2 velocity = body.velocity;
+        float angle = Mathf.Atan2(velocity.y, velocity.x) * Mathf.Rad2Deg;
+        transform.rotation = Quaternion.AngleAxis(angle, Vector3.forward);
     }
 
     private void ApplyLayer()
@@ -148,6 +246,28 @@ public class Bullet : MonoBehaviour
         }
 
         return IsLayer(layer, GameLayers.Ground) || IsLayer(layer, GameLayers.Player);
+    }
+
+    private bool ShouldPierceTarget(Collider2D other)
+    {
+        return isPiercing && other != null && IsLayer(other.gameObject.layer, GameLayers.Enemy);
+    }
+
+    private bool ShouldIgnoreDashingPlayer(Collider2D other)
+    {
+        if (source != BulletSource.Enemy)
+        {
+            return false;
+        }
+
+        MCController player = other.GetComponentInParent<MCController>();
+        if (player == null || !player.IsDashing)
+        {
+            return false;
+        }
+
+        IgnoreCollisionWith(other);
+        return true;
     }
 
     private void ApplyHitEffect(Collider2D other)

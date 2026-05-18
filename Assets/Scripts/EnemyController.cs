@@ -90,6 +90,11 @@ public class EnemyController : MonoBehaviour
         InitializeIfNeeded();
     }
 
+    private void FixedUpdate()
+    {
+        ApplyMovementKindPhysics();
+    }
+
     private void OnValidate()
     {
         maxHp = Mathf.Max(1, maxHp);
@@ -111,13 +116,14 @@ public class EnemyController : MonoBehaviour
 
         CacheRigidbody();
         Vector2 normalizedInput = NormalizeMovementInput(moveInput);
+        float scaledMoveSpeed = moveSpeed * GameTime.WorldScale;
         if (movementKind == EnemyMovementKind.Flying)
         {
-            body.velocity = normalizedInput * moveSpeed;
+            body.velocity = normalizedInput * scaledMoveSpeed;
             return;
         }
 
-        body.velocity = new Vector2(normalizedInput.x * moveSpeed, body.velocity.y);
+        body.velocity = new Vector2(normalizedInput.x * scaledMoveSpeed, body.velocity.y);
     }
 
     public void StopMoving()
@@ -150,7 +156,7 @@ public class EnemyController : MonoBehaviour
 
         Bullet bullet = SpawnBullet();
         bullet.Configure(BulletSource.Enemy, NormalizeDirection(direction), bulletSpeed);
-        nextAttackTime = Time.time + attackCooldown;
+        nextAttackTime = Time.time + attackCooldown / Mathf.Max(0.01f, GameTime.WorldScale);
         return true;
     }
 
@@ -303,7 +309,7 @@ public class EnemyController : MonoBehaviour
             return;
         }
 
-        body.gravityScale = movementKind == EnemyMovementKind.Flying ? 0f : initialGravityScale;
+        body.gravityScale = movementKind == EnemyMovementKind.Flying ? 0f : initialGravityScale * GameTime.WorldScale;
     }
 
     private void ApplyLayer()
