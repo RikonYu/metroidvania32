@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody2D))]
@@ -52,7 +53,9 @@ public class MCController : MonoBehaviour
     private RigidbodyConstraints2D movementConstraints;
     private ContactFilter2D movementContactFilter;
     private readonly ContactPoint2D[] supportContacts = new ContactPoint2D[MaxSupportContacts];
+    private readonly List<WaterZone> waterZones = new List<WaterZone>();
     private float inputX;
+    private float inputY;
     private float coyoteCounter;
     private float jumpBufferCounter;
     private bool jumpHeld;
@@ -71,12 +74,14 @@ public class MCController : MonoBehaviour
     private bool bulletTimeStartedForCharge;
     private float attackChargeTime;
     private float fullChargeAutoFireCounter;
+    private WaterZone currentWaterZone;
 
     public bool IsGrounded { get; private set; }
     public bool IsOnSafeGround { get; private set; }
     public int FacingDirection { get; private set; } = GameDirection.Right;
     public bool IsDashing { get { return isDashing; } }
     public bool IsDashActive { get { return isDashing || isDashRecoiling; } }
+    public bool IsUnderwater { get { return currentWaterZone != null; } }
 
     public Vector2 Velocity
     {
@@ -124,6 +129,8 @@ public class MCController : MonoBehaviour
         CancelAttackCharge();
         isDashing = false;
         isDashRecoiling = false;
+        waterZones.Clear();
+        currentWaterZone = null;
 
         if (body != null)
         {
@@ -137,15 +144,17 @@ public class MCController : MonoBehaviour
         if (inputLocked)
         {
             inputX = 0f;
+            inputY = 0f;
             jumpHeld = false;
             CancelAttackCharge();
             return;
         }
 
         inputX = Input.GetAxisRaw("Horizontal");
+        inputY = Input.GetAxisRaw("Vertical");
         jumpHeld = Input.GetKey(KeyCode.Space);
 
-        if (Input.GetKeyDown(KeyCode.Space))
+        if (!IsUnderwater && Input.GetKeyDown(KeyCode.Space))
         {
             jumpBufferCounter = jumpBufferTime;
         }
@@ -183,6 +192,12 @@ public class MCController : MonoBehaviour
             return;
         }
 
+        if (IsUnderwater)
+        {
+            ApplyUnderwaterMovement();
+            return;
+        }
+
         ApplyWorldGravityScale();
         UpdateTimers();
         ApplyMovement();
@@ -197,6 +212,7 @@ public class MCController : MonoBehaviour
         if (locked)
         {
             inputX = 0f;
+            inputY = 0f;
             jumpBufferCounter = 0f;
             CancelAttackCharge();
             StopDash();
@@ -259,6 +275,31 @@ public class MCController : MonoBehaviour
         coyoteCounter = 0f;
         IsGrounded = false;
         IsOnSafeGround = false;
+    }
+
+    private void ApplyUnderwaterMovement()
+    {
+        if (currentWaterZone == null)
+        {
+            return;
+        }
+
+        body.gravityScale = 0f;
+        coyoteCounter = 0f;
+        jumpBufferCounter = 0f;
+        SetEdgeSlipLock(false);
+
+        Vector2 input = new Vector2(inputX, inputY);
+        Vector2 targetVelocity = new Vector2(
+            input.x * currentWaterZone.PlayerHorizontalSwimSpeed,
+            input.y * currentWaterZone.PlayerVerticalSwimSpeed);
+        targetVelocity *= GameTime.WorldScale;
+
+        bool hasSwimInput = input.sqrMagnitude > 0.0001f;
+        float rate = hasSwimInput
+            ? currentWaterZone.PlayerSwimAcceleration
+            : currentWaterZone.PlayerSwimDeceleration;
+        body.velocity = Vector2.MoveTowards(body.velocity, targetVelocity, rate * GameTime.FixedDeltaTime);
     }
 
     private void ApplyExtraGravity()
@@ -583,6 +624,12 @@ public class MCController : MonoBehaviour
 
     private void RestoreGravity()
     {
+        if (IsUnderwater)
+        {
+            body.gravityScale = 0f;
+            return;
+        }
+
         ApplyWorldGravityScale();
     }
 
@@ -715,12 +762,19 @@ public class MCController : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        EnterWater(GetWaterZone(other));
         HandleDashTrigger(other);
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
+        EnterWater(GetWaterZone(other));
         HandleDashTrigger(other);
+    }
+
+    private void OnTriggerExit2D(Collider2D other)
+    {
+        ExitWater(GetWaterZone(other));
     }
 
     private void HandleDashCollision(Collision2D collision)
@@ -753,6 +807,53 @@ public class MCController : MonoBehaviour
         {
             StopDashWithRecoil();
         }
+    }
+
+    private void EnterWater(WaterZone waterZone)
+    {
+        if (waterZone == null)
+        {
+            return;
+        }
+
+        if (!waterZones.Contains(waterZone))
+        {
+            waterZones.Add(waterZone);
+        }
+
+        currentWaterZone = waterZone;
+        body.gravityScale = 0f;
+        jumpBufferCounter = 0f;
+        coyoteCounter = 0f;
+        SetEdgeSlipLock(false);
+    }
+
+    private void ExitWater(WaterZone waterZone)
+    {
+        if (waterZone == null)
+        {
+            return;
+        }
+
+        bool wasCurrent = currentWaterZone == waterZone;
+        waterZones.Remove(waterZone);
+        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+
+        if (currentWaterZone != null)
+        {
+            return;
+        }
+
+        RestoreGravity();
+        if (wasCurrent && (inputY > 0.01f || body.velocity.y > 0.01f))
+        {
+            body.velocity = new Vector2(body.velocity.x, Mathf.Max(body.velocity.y, waterZone.WaterExitBoost * GameTime.WorldScale));
+        }
+    }
+
+    private static WaterZone GetWaterZone(Collider2D other)
+    {
+        return other != null ? other.GetComponentInParent<WaterZone>() : null;
     }
 
     private static bool IsEnemyCollider(Collider2D collider2D)
