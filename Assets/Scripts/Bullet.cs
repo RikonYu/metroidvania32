@@ -350,11 +350,11 @@ public class Bullet : MonoBehaviour
 
     private static void ConfigureLayerCollisions()
     {
-        ConfigureBulletLayer(GameLayers.PlayerBullet, GameLayers.Ground, GameLayers.Enemy);
-        ConfigureBulletLayer(GameLayers.EnemyBullet, GameLayers.Ground, GameLayers.Player);
+        ConfigureBulletLayer(GameLayers.PlayerBullet, GameLayers.Ground, GameLayers.Enemy, GameLayers.Water);
+        ConfigureBulletLayer(GameLayers.EnemyBullet, GameLayers.Ground, GameLayers.Player, GameLayers.Water);
     }
 
-    private static void ConfigureBulletLayer(string bulletLayerName, string targetLayerNameA, string targetLayerNameB)
+    private static void ConfigureBulletLayer(string bulletLayerName, params string[] targetLayerNames)
     {
         int bulletLayer = LayerMask.NameToLayer(bulletLayerName);
         if (bulletLayer < 0)
@@ -367,8 +367,10 @@ public class Bullet : MonoBehaviour
             Physics2D.IgnoreLayerCollision(bulletLayer, layer, true);
         }
 
-        EnableLayerCollision(bulletLayer, targetLayerNameA);
-        EnableLayerCollision(bulletLayer, targetLayerNameB);
+        for (int i = 0; i < targetLayerNames.Length; i++)
+        {
+            EnableLayerCollision(bulletLayer, targetLayerNames[i]);
+        }
     }
 
     private static void EnableLayerCollision(int bulletLayer, string targetLayerName)
