@@ -15,6 +15,7 @@ public class EnemyController : MonoBehaviour
     [Header("Core")]
     [SerializeField] private EnemyMovementKind movementKind = EnemyMovementKind.Crawling;
     [SerializeField] private bool isBoss;
+    [SerializeField] private bool isUnderwaterEnemy;
     [SerializeField] private int maxHp = 3;
 
     [Header("Movement")]
@@ -58,6 +59,11 @@ public class EnemyController : MonoBehaviour
     public bool IsBoss
     {
         get { return isBoss; }
+    }
+
+    public bool IsUnderwaterEnemy
+    {
+        get { return isUnderwaterEnemy; }
     }
 
     public bool IsAlive
@@ -358,13 +364,29 @@ public class EnemyController : MonoBehaviour
         playerRespawn.TakeEnemyMeleeHit(this, knockbackDirection);
     }
 
+    private void HandleWaterContact(Collider2D other)
+    {
+        if (!IsAlive || isUnderwaterEnemy)
+        {
+            return;
+        }
+
+        WaterZone waterZone = other != null ? other.GetComponentInParent<WaterZone>() : null;
+        if (waterZone != null && waterZone.KillNonUnderwaterEnemies)
+        {
+            Die();
+        }
+    }
+
     private void OnTriggerEnter2D(Collider2D other)
     {
+        HandleWaterContact(other);
         HandlePlayerContact(other);
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
+        HandleWaterContact(other);
         HandlePlayerContact(other);
     }
 
