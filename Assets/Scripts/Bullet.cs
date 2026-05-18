@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public enum BulletSource
@@ -20,6 +21,8 @@ public class Bullet : MonoBehaviour
 
     private Rigidbody2D body;
     private Vector2 worldVelocity;
+    private readonly List<WaterZone> waterZones = new List<WaterZone>();
+    private WaterZone currentWaterZone;
 
     public BulletSource Source
     {
@@ -74,6 +77,12 @@ public class Bullet : MonoBehaviour
         FaceVelocity();
     }
 
+    private void OnDisable()
+    {
+        waterZones.Clear();
+        currentWaterZone = null;
+    }
+
     private void OnValidate()
     {
         direction = NormalizeDirection(direction);
@@ -120,7 +129,18 @@ public class Bullet : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        EnterWater(GetWaterZone(other));
         HandleHit(other);
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        EnterWater(GetWaterZone(other));
+    }
+
+    private void OnTriggerExit2D(Collider2D other)
+    {
+        ExitWater(GetWaterZone(other));
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
@@ -203,12 +223,19 @@ public class Bullet : MonoBehaviour
         {
             worldVelocity += Physics2D.gravity * (hyperbolicGravityScale * GameTime.FixedDeltaTime);
         }
-        else
+
+        ApplyWaterDrag();
+        ApplyBodyVelocity();
+    }
+
+    private void ApplyWaterDrag()
+    {
+        if (currentWaterZone == null || worldVelocity.sqrMagnitude <= 0.0001f)
         {
-            worldVelocity = NormalizeDirection(direction) * speed;
+            return;
         }
 
-        ApplyBodyVelocity();
+        worldVelocity -= worldVelocity * Mathf.Clamp01(currentWaterZone.BulletDrag * GameTime.FixedDeltaTime);
     }
 
     private void ApplyBodyVelocity()
@@ -251,6 +278,37 @@ public class Bullet : MonoBehaviour
     private bool ShouldPierceTarget(Collider2D other)
     {
         return isPiercing && other != null && IsLayer(other.gameObject.layer, GameLayers.Enemy);
+    }
+
+    private void EnterWater(WaterZone waterZone)
+    {
+        if (waterZone == null)
+        {
+            return;
+        }
+
+        if (!waterZones.Contains(waterZone))
+        {
+            waterZones.Add(waterZone);
+        }
+
+        currentWaterZone = waterZone;
+    }
+
+    private void ExitWater(WaterZone waterZone)
+    {
+        if (waterZone == null)
+        {
+            return;
+        }
+
+        waterZones.Remove(waterZone);
+        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+    }
+
+    private static WaterZone GetWaterZone(Collider2D other)
+    {
+        return other != null ? other.GetComponentInParent<WaterZone>() : null;
     }
 
     private bool ShouldIgnoreDashingPlayer(Collider2D other)
