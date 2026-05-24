@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 public enum EnemyMovementKind
 {
@@ -12,6 +11,8 @@ public enum EnemyMovementKind
 [RequireComponent(typeof(Collider2D))]
 public class EnemyController : MonoBehaviour
 {
+    private const int MaxSupportContacts = 8;
+
     [Header("Core")]
     [SerializeField] private EnemyMovementKind movementKind = EnemyMovementKind.Crawling;
     [SerializeField] private bool isBoss;
@@ -20,6 +21,8 @@ public class EnemyController : MonoBehaviour
 
     [Header("Movement")]
     [SerializeField] private float moveSpeed = 3f;
+    [SerializeField] private float groundContactMinNormalY = 0.2f;
+    [SerializeField] private LayerMask movementGroundMask;
     [SerializeField] private List<Vector2> patrolPoints = new List<Vector2>();
 
     [Header("Attack")]
@@ -30,16 +33,35 @@ public class EnemyController : MonoBehaviour
     [SerializeField] private float attackCooldown = 1f;
 
     [Header("Melee Contact")]
+    [SerializeField] private int contactDamage = 1;
     [SerializeField] private float normalEnemyKnockbackDistance = 3f;
     [SerializeField] private float knockbackDuration = 0.15f;
 
+    [Header("Elemental Status")]
+    [SerializeField] private bool isBurning;
+    [SerializeField] private bool isFrozen;
+    [SerializeField] private bool isPoisoned;
+    [SerializeField] private bool isIceSlowed;
+
     private Rigidbody2D body;
+    private Animator[] animators;
+    private ContactFilter2D movementContactFilter;
+    private readonly ContactPoint2D[] supportContacts = new ContactPoint2D[MaxSupportContacts];
+    private readonly List<WaterZone> waterZones = new List<WaterZone>();
+    private Collider2D currentGround;
+    private Vector2 currentGroundNormal = Vector2.up;
     private Vector3 spawnPosition;
     private float initialGravityScale = 1f;
-    private float nextAttackTime;
+    private float attackCooldownRemaining;
     private int currentHp;
     private bool dead;
+    private bool isGrounded;
     private bool initialized;
+    private WaterZone currentWaterZone;
+    private float burningTimeRemaining;
+    private float burningDamagePerSecond;
+    private float burningDamageAccumulator;
+    private float freezeTimeRemaining;
 
     public EnemyMovementKind MovementKind
     {
@@ -73,12 +95,17 @@ public class EnemyController : MonoBehaviour
 
     public bool CanAttack
     {
-        get { return IsAlive && Time.time >= nextAttackTime; }
+        get { return IsAlive && !isFrozen && attackCooldownRemaining <= 0f; }
     }
 
     public float ContactKnockbackDistance
     {
         get { return isBoss ? 0f : normalEnemyKnockbackDistance; }
+    }
+
+    public int ContactDamage
+    {
+        get { return contactDamage; }
     }
 
     public float KnockbackDuration
@@ -91,25 +118,71 @@ public class EnemyController : MonoBehaviour
         get { return patrolPoints; }
     }
 
+    public bool IsBurning
+    {
+        get { return isBurning; }
+    }
+
+    public bool IsFrozen
+    {
+        get { return isFrozen; }
+    }
+
+    public bool IsPoisoned
+    {
+        get { return isPoisoned; }
+    }
+
+    public bool IsIceSlowed
+    {
+        get { return isIceSlowed; }
+    }
+
     private void Awake()
     {
         InitializeIfNeeded();
     }
 
+    private void OnDisable()
+    {
+        waterZones.Clear();
+        currentWaterZone = null;
+    }
+
+    private void Update()
+    {
+        UpdateElementalStatuses(Time.deltaTime);
+        UpdateAttackCooldown(Time.deltaTime);
+        ApplyAnimatorSpeed();
+    }
+
     private void FixedUpdate()
     {
+        bool wasGroundedOnSlope = isGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal);
+        UpdateGroundSupport();
+        PreventSlopeExitLaunch(wasGroundedOnSlope);
         ApplyMovementKindPhysics();
+        if (isFrozen)
+        {
+            ApplyFrozenVelocityLock();
+        }
+
+        ApplyMovingPlatformMotion();
     }
 
     private void OnValidate()
     {
         maxHp = Mathf.Max(1, maxHp);
         moveSpeed = Mathf.Max(0f, moveSpeed);
+        groundContactMinNormalY = Mathf.Clamp01(groundContactMinNormalY);
         bulletSpeed = Mathf.Max(0f, bulletSpeed);
         attackCooldown = Mathf.Max(0f, attackCooldown);
+        contactDamage = Mathf.Max(0, contactDamage);
         normalEnemyKnockbackDistance = Mathf.Max(0f, normalEnemyKnockbackDistance);
         knockbackDuration = Mathf.Max(0.01f, knockbackDuration);
-        attackDirection = NormalizeDirection(attackDirection);
+        attackDirection = Utils.NormalizeOrFallback(attackDirection, Vector2.left);
+        EnsureMovementLayerMask();
+        UpdateMovementContactFilter();
         ApplyLayerAfterValidation();
     }
 
@@ -121,15 +194,29 @@ public class EnemyController : MonoBehaviour
         }
 
         CacheRigidbody();
-        Vector2 normalizedInput = NormalizeMovementInput(moveInput);
-        float scaledMoveSpeed = moveSpeed * GameTime.WorldScale;
+        if (isFrozen)
+        {
+            ApplyFrozenVelocityLock();
+            return;
+        }
+
+        Vector2 normalizedInput = Utils.NormalizeOrZero(moveInput);
+        float scaledMoveSpeed = moveSpeed * GameTime.WorldScale * GetEffectiveTimeScale();
         if (movementKind == EnemyMovementKind.Flying)
         {
             body.velocity = normalizedInput * scaledMoveSpeed;
             return;
         }
 
-        body.velocity = new Vector2(normalizedInput.x * scaledMoveSpeed, body.velocity.y);
+        UpdateGroundSupport();
+        float horizontalSpeed = normalizedInput.x * scaledMoveSpeed;
+        if (isGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal))
+        {
+            body.velocity = SlopeMovement.GetSurfaceVelocityForHorizontalSpeed(horizontalSpeed, currentGroundNormal);
+            return;
+        }
+
+        body.velocity = new Vector2(horizontalSpeed, body.velocity.y);
     }
 
     public void StopMoving()
@@ -142,6 +229,13 @@ public class EnemyController : MonoBehaviour
         if (movementKind == EnemyMovementKind.Flying)
         {
             body.velocity = Vector2.zero;
+            return;
+        }
+
+        UpdateGroundSupport();
+        if (isGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal))
+        {
+            body.velocity = SlopeMovement.GetSurfaceVelocityForHorizontalSpeed(0f, currentGroundNormal);
             return;
         }
 
@@ -160,9 +254,24 @@ public class EnemyController : MonoBehaviour
             return false;
         }
 
+        if (!FireBullet(direction))
+        {
+            return false;
+        }
+
+        attackCooldownRemaining = attackCooldown;
+        return true;
+    }
+
+    public bool FireBullet(Vector2 direction)
+    {
+        if (!IsAlive || isFrozen)
+        {
+            return false;
+        }
+
         Bullet bullet = SpawnBullet();
-        bullet.Configure(BulletSource.Enemy, NormalizeDirection(direction), bulletSpeed);
-        nextAttackTime = Time.time + attackCooldown / Mathf.Max(0.01f, GameTime.WorldScale);
+        bullet.Configure(BulletSource.Enemy, Utils.NormalizeOrFallback(direction, Vector2.left), bulletSpeed);
         return true;
     }
 
@@ -188,6 +297,55 @@ public class EnemyController : MonoBehaviour
         }
 
         currentHp = Mathf.Min(maxHp, currentHp + amount);
+    }
+
+    public void RestoreHpToFull()
+    {
+        if (IsAlive)
+        {
+            currentHp = maxHp;
+        }
+    }
+
+    public void ApplyBurning(int sourceDamage)
+    {
+        if (!IsAlive || sourceDamage <= 0)
+        {
+            return;
+        }
+
+        isBurning = true;
+        burningTimeRemaining = Consts.BurningDuration;
+        burningDamagePerSecond = Mathf.Max(burningDamagePerSecond, sourceDamage * Consts.BurningDamagePerSecondRatio);
+    }
+
+    public void ApplyFrozenOrSlowed()
+    {
+        if (!IsAlive)
+        {
+            return;
+        }
+
+        if (isBoss)
+        {
+            isIceSlowed = true;
+            freezeTimeRemaining = Consts.FreezeDuration;
+            ApplyAnimatorSpeed();
+            return;
+        }
+
+        isFrozen = true;
+        freezeTimeRemaining = Consts.FreezeDuration;
+        ApplyFrozenVelocityLock();
+        ApplyAnimatorSpeed();
+    }
+
+    public void ApplyPoisoned()
+    {
+        if (IsAlive)
+        {
+            isPoisoned = true;
+        }
     }
 
     public void Die()
@@ -220,6 +378,7 @@ public class EnemyController : MonoBehaviour
         InitializeIfNeeded();
         dead = false;
         currentHp = maxHp;
+        ClearElementalStatuses();
         transform.position = spawnPosition;
         gameObject.SetActive(true);
         ApplyLayer();
@@ -242,6 +401,16 @@ public class EnemyController : MonoBehaviour
         patrolPoints[index] = worldPoint;
     }
 
+    public void RemovePatrolPointAt(int index)
+    {
+        if (index < 0 || index >= patrolPoints.Count)
+        {
+            return;
+        }
+
+        patrolPoints.RemoveAt(index);
+    }
+
     public void ClearPatrolPoints()
     {
         patrolPoints.Clear();
@@ -253,7 +422,7 @@ public class EnemyController : MonoBehaviour
         for (int i = 0; i < enemies.Length; i++)
         {
             EnemyController enemy = enemies[i];
-            if (enemy == null || enemy.isBoss || !IsSceneInstance(enemy))
+            if (enemy == null || enemy.isBoss || !Utils.IsSceneInstance(enemy.gameObject))
             {
                 continue;
             }
@@ -293,6 +462,33 @@ public class EnemyController : MonoBehaviour
         }
     }
 
+    private void CacheAnimators()
+    {
+        animators = GetComponentsInChildren<Animator>(true);
+    }
+
+    private void ApplyAnimatorSpeed()
+    {
+        if (animators == null || animators.Length == 0)
+        {
+            CacheAnimators();
+        }
+
+        if (animators == null)
+        {
+            return;
+        }
+
+        float animatorSpeed = IsAlive ? GameTime.WorldScale * GetEffectiveTimeScale() : 0f;
+        for (int i = 0; i < animators.Length; i++)
+        {
+            if (animators[i] != null)
+            {
+                animators[i].speed = animatorSpeed;
+            }
+        }
+    }
+
     private void InitializeIfNeeded()
     {
         if (initialized)
@@ -301,11 +497,16 @@ public class EnemyController : MonoBehaviour
         }
 
         CacheRigidbody();
+        CacheAnimators();
+        EnsureMovementLayerMask();
+        UpdateMovementContactFilter();
         spawnPosition = transform.position;
         currentHp = maxHp;
+        ClearElementalStatuses();
         initialized = true;
         ApplyLayer();
         ApplyMovementKindPhysics();
+        UpdateGroundSupport();
     }
 
     private void ApplyMovementKindPhysics()
@@ -315,7 +516,175 @@ public class EnemyController : MonoBehaviour
             return;
         }
 
-        body.gravityScale = movementKind == EnemyMovementKind.Flying ? 0f : initialGravityScale * GameTime.WorldScale;
+        if (isFrozen)
+        {
+            body.gravityScale = currentWaterZone != null
+                ? initialGravityScale * Consts.FrozenWaterBuoyancyGravityScale * GameTime.WorldScale
+                : initialGravityScale * GameTime.WorldScale;
+            return;
+        }
+
+        float effectiveScale = GameTime.WorldScale * GetEffectiveTimeScale();
+        body.gravityScale = movementKind == EnemyMovementKind.Flying ? 0f : initialGravityScale * effectiveScale;
+    }
+
+    private void UpdateGroundSupport()
+    {
+        if (movementKind != EnemyMovementKind.Crawling)
+        {
+            currentGround = null;
+            isGrounded = false;
+            currentGroundNormal = Vector2.up;
+            return;
+        }
+
+        GroundSupport support;
+        if (SlopeMovement.TryFindSupport(
+            body,
+            movementContactFilter,
+            supportContacts,
+            groundContactMinNormalY,
+            transform.position.y,
+            movementGroundMask,
+            out support))
+        {
+            currentGround = support.Collider;
+            isGrounded = true;
+            currentGroundNormal = support.Normal;
+            return;
+        }
+
+        currentGround = null;
+        isGrounded = false;
+        currentGroundNormal = Vector2.up;
+    }
+
+    private void ApplyMovingPlatformMotion()
+    {
+        if (body == null || !isGrounded)
+        {
+            return;
+        }
+
+        MovingPlatform movingPlatform = currentGround != null ? currentGround.GetComponentInParent<MovingPlatform>() : null;
+        if (movingPlatform == null || movingPlatform.CurrentDelta.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        body.position += movingPlatform.CurrentDelta;
+    }
+
+    private void PreventSlopeExitLaunch(bool wasGroundedOnSlope)
+    {
+        if (!wasGroundedOnSlope || isGrounded || body == null || body.velocity.y <= 0f)
+        {
+            return;
+        }
+
+        body.velocity = new Vector2(body.velocity.x, 0f);
+    }
+
+    private void UpdateElementalStatuses(float deltaTime)
+    {
+        if (deltaTime <= 0f)
+        {
+            return;
+        }
+
+        UpdateBurning(deltaTime);
+        UpdateFrozenOrSlowed(deltaTime);
+    }
+
+    private void UpdateBurning(float deltaTime)
+    {
+        if (!isBurning)
+        {
+            return;
+        }
+
+        burningTimeRemaining -= deltaTime;
+        burningDamageAccumulator += burningDamagePerSecond * deltaTime;
+        int damageToApply = Mathf.FloorToInt(burningDamageAccumulator);
+        if (damageToApply > 0)
+        {
+            burningDamageAccumulator -= damageToApply;
+            TakeDamage(damageToApply);
+        }
+
+        if (burningTimeRemaining <= 0f || !IsAlive)
+        {
+            isBurning = false;
+            burningTimeRemaining = 0f;
+            burningDamagePerSecond = 0f;
+            burningDamageAccumulator = 0f;
+        }
+    }
+
+    private void UpdateFrozenOrSlowed(float deltaTime)
+    {
+        if (!isFrozen && !isIceSlowed)
+        {
+            return;
+        }
+
+        freezeTimeRemaining -= deltaTime;
+        if (freezeTimeRemaining > 0f)
+        {
+            return;
+        }
+
+        isFrozen = false;
+        isIceSlowed = false;
+        freezeTimeRemaining = 0f;
+        ApplyAnimatorSpeed();
+    }
+
+    private void UpdateAttackCooldown(float deltaTime)
+    {
+        if (attackCooldownRemaining <= 0f)
+        {
+            return;
+        }
+
+        float scaledDeltaTime = deltaTime * GameTime.WorldScale * GetEffectiveTimeScale();
+        if (scaledDeltaTime <= 0f)
+        {
+            return;
+        }
+
+        attackCooldownRemaining = Mathf.Max(0f, attackCooldownRemaining - scaledDeltaTime);
+    }
+
+    private void ApplyFrozenVelocityLock()
+    {
+        if (body != null)
+        {
+            body.velocity = new Vector2(0f, body.velocity.y);
+        }
+    }
+
+    private float GetEffectiveTimeScale()
+    {
+        if (isFrozen)
+        {
+            return 0f;
+        }
+
+        return isIceSlowed ? Consts.BossFreezeSlowScale : 1f;
+    }
+
+    private void ClearElementalStatuses()
+    {
+        isBurning = false;
+        isFrozen = false;
+        isPoisoned = false;
+        isIceSlowed = false;
+        burningTimeRemaining = 0f;
+        burningDamagePerSecond = 0f;
+        burningDamageAccumulator = 0f;
+        freezeTimeRemaining = 0f;
+        ApplyAnimatorSpeed();
     }
 
     private void ApplyLayer()
@@ -328,24 +697,18 @@ public class EnemyController : MonoBehaviour
         GameLayers.ApplyToAfterValidation(gameObject, GameLayers.Enemy);
     }
 
-    private static Vector2 NormalizeMovementInput(Vector2 moveInput)
+    private void EnsureMovementLayerMask()
     {
-        if (moveInput.sqrMagnitude <= 0.0001f)
+        if (movementGroundMask == 0)
         {
-            return Vector2.zero;
+            movementGroundMask = LayerMask.GetMask(GameLayers.Ground, GameLayers.Platform);
         }
-
-        return moveInput.normalized;
     }
 
-    private static Vector2 NormalizeDirection(Vector2 rawDirection)
+    private void UpdateMovementContactFilter()
     {
-        if (rawDirection.sqrMagnitude <= 0.0001f)
-        {
-            return Vector2.left;
-        }
-
-        return rawDirection.normalized;
+        movementContactFilter.useTriggers = false;
+        movementContactFilter.SetLayerMask(movementGroundMask);
     }
 
     private void HandlePlayerContact(Collider2D other)
@@ -372,23 +735,56 @@ public class EnemyController : MonoBehaviour
             return;
         }
 
-        WaterZone waterZone = other != null ? other.GetComponentInParent<WaterZone>() : null;
+        WaterZone waterZone = Utils.GetWaterZone(other);
         if (waterZone != null && waterZone.KillNonUnderwaterEnemies)
         {
             Die();
         }
     }
 
+    private void EnterWater(WaterZone waterZone)
+    {
+        if (waterZone == null)
+        {
+            return;
+        }
+
+        if (!waterZones.Contains(waterZone))
+        {
+            waterZones.Add(waterZone);
+        }
+
+        currentWaterZone = waterZone;
+    }
+
+    private void ExitWater(WaterZone waterZone)
+    {
+        if (waterZone == null)
+        {
+            return;
+        }
+
+        waterZones.Remove(waterZone);
+        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+    }
+
     private void OnTriggerEnter2D(Collider2D other)
     {
+        EnterWater(Utils.GetWaterZone(other));
         HandleWaterContact(other);
         HandlePlayerContact(other);
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
+        EnterWater(Utils.GetWaterZone(other));
         HandleWaterContact(other);
         HandlePlayerContact(other);
+    }
+
+    private void OnTriggerExit2D(Collider2D other)
+    {
+        ExitWater(Utils.GetWaterZone(other));
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
@@ -399,12 +795,6 @@ public class EnemyController : MonoBehaviour
     private void OnCollisionStay2D(Collision2D collision)
     {
         HandlePlayerContact(collision.collider);
-    }
-
-    private static bool IsSceneInstance(EnemyController enemy)
-    {
-        Scene scene = enemy.gameObject.scene;
-        return scene.IsValid();
     }
 
     private void OnDrawGizmosSelected()

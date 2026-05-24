@@ -70,6 +70,7 @@ public class CampController : MonoBehaviour
         }
 
         playerRespawn.SetCamp(this);
+        Utils.RestoreHealthBottles();
         if (reviveEnemiesOnSave)
         {
             EnemyController.RespawnNonBossEnemies();

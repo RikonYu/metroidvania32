@@ -9,8 +9,8 @@ using UnityEditor;
 [ExecuteAlways]
 public class Room : MonoBehaviour
 {
-    public const float BaseWidth = 32f;
-    public const float BaseHeight = 16f;
+    public const float BaseWidth = Consts.RoomBaseWidth;
+    public const float BaseHeight = Consts.RoomBaseHeight;
 
     [SerializeField] private string roomId = "";
     [SerializeField] private Vector2Int sizeUnits = Vector2Int.one;
@@ -140,7 +140,7 @@ public class Room : MonoBehaviour
             return false;
         }
 
-        return RectsOverlapByArea(WorldRect, other.WorldRect);
+        return Utils.RectsOverlapByArea(WorldRect, other.WorldRect);
     }
 
     public Rect GetExitRect(RoomExit exit)
@@ -290,14 +290,6 @@ public class Room : MonoBehaviour
         return GetComponentInChildren<Tilemap>(true);
     }
 
-    private static bool RectsOverlapByArea(Rect a, Rect b)
-    {
-        const float epsilon = 0.0001f;
-        float overlapX = Mathf.Min(a.xMax, b.xMax) - Mathf.Max(a.xMin, b.xMin);
-        float overlapY = Mathf.Min(a.yMax, b.yMax) - Mathf.Max(a.yMin, b.yMin);
-        return overlapX > epsilon && overlapY > epsilon;
-    }
-
 #if UNITY_EDITOR
     private void WarnAboutOverlaps()
     {
@@ -350,15 +342,42 @@ public class Room : MonoBehaviour
 
         bool hasOverlap = GetOverlappingRooms().Count > 0;
         Color outlineColor = hasOverlap ? Color.red : gizmoColor;
+        DrawRoomUnitGizmos(rect);
         Gizmos.color = outlineColor;
         Gizmos.DrawWireCube(center, size);
 
+        Vector2 worldSize = SizeWorld;
         Handles.color = outlineColor;
         Handles.Label(
             new Vector3(rect.xMin, rect.yMax, transform.position.z),
-            string.Format("{0} ({1},{2}) {3}x{4}", RoomId, GridPosition.x, GridPosition.y, sizeUnits.x, sizeUnits.y));
+            string.Format(
+                "{0} ({1},{2}) {3}x{4} rooms / {5:0.##}x{6:0.##} world",
+                RoomId,
+                GridPosition.x,
+                GridPosition.y,
+                sizeUnits.x,
+                sizeUnits.y,
+                worldSize.x,
+                worldSize.y));
 
         DrawExitGizmos();
+    }
+
+    private void DrawRoomUnitGizmos(Rect roomRect)
+    {
+        Gizmos.color = new Color(0.4f, 0.4f, 0.4f, 1f);
+        Vector3 unitSize = new Vector3(BaseWidth, BaseHeight, 0f);
+        for (int y = 0; y < sizeUnits.y; y++)
+        {
+            for (int x = 0; x < sizeUnits.x; x++)
+            {
+                Vector3 unitCenter = new Vector3(
+                    roomRect.xMin + BaseWidth * (x + 0.5f),
+                    roomRect.yMin + BaseHeight * (y + 0.5f),
+                    transform.position.z);
+                Gizmos.DrawWireCube(unitCenter, unitSize);
+            }
+        }
     }
 
     private void DrawExitGizmos()

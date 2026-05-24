@@ -14,6 +14,7 @@ public class MCController : MonoBehaviour
     [Header("Jump Feel")]
     [SerializeField] private float coyoteTime = 0.08f;
     [SerializeField] private float jumpBufferTime = 0.1f;
+    [SerializeField] private float jumpGroundIgnoreTime = 0.08f;
     [SerializeField] private float fallGravityMultiplier = 1.8f;
     [SerializeField] private float lowJumpGravityMultiplier = 2.2f;
 
@@ -41,23 +42,47 @@ public class MCController : MonoBehaviour
     [SerializeField] private GameObject Bullet;
     [SerializeField] private Transform bulletSpawnPoint;
     [SerializeField] private float bulletSpawnOffset = 0.75f;
-    [SerializeField] private int attackDamage = 1;
     [SerializeField] private float minBulletSpeed = 12f;
     [SerializeField] private float maxBulletSpeed = 26f;
     [SerializeField] private float maxChargeTime = 1.2f;
     [SerializeField] private float fullChargeGroundMoveSpeedMultiplier = 0.45f;
-    [SerializeField] private float fullChargeAutoFireDelay = 0.6f;
     [SerializeField] private float aerialBulletTimeScale = 0.35f;
+    [SerializeField] private BulletElement bulletElement = BulletElement.None;
+
+    [Header("Healing")]
+    [SerializeField] private KeyCode useHealthBottleKey = KeyCode.R;
+    [SerializeField] private int healthBottleHealAmount = 1;
+
+    [Header("HP")]
+    [SerializeField] private int maxHp = 5;
+    [SerializeField] private int currentHp = 5;
+
+    [Header("Stamina")]
+    [SerializeField] private Transform breathPoint;
+    [SerializeField] private Vector2 breathPointFallbackOffset = new Vector2(0f, 0.75f);
+    [SerializeField] private float maxStamina = 5f;
+    [SerializeField] private float staminaDrainPerSecond = 1f;
+    [SerializeField] private float staminaRecoveryPerSecond = 2f;
+    [SerializeField] private float currentStamina = 5f;
+
+    [Header("Elemental Status")]
+    [SerializeField] private bool isBurning;
+    [SerializeField] private bool isFrozen;
+    [SerializeField] private bool isPoisoned;
 
     private Rigidbody2D body;
+    private Animator[] animators;
     private RigidbodyConstraints2D movementConstraints;
     private ContactFilter2D movementContactFilter;
     private readonly ContactPoint2D[] supportContacts = new ContactPoint2D[MaxSupportContacts];
     private readonly List<WaterZone> waterZones = new List<WaterZone>();
+    private readonly List<Swirl> activeSwirls = new List<Swirl>();
+    private Vector2 currentGroundNormal = Vector2.up;
     private float inputX;
     private float inputY;
     private float coyoteCounter;
     private float jumpBufferCounter;
+    private float groundIgnoreCounter;
     private bool jumpHeld;
     private bool inputLocked;
     private Collider2D currentGround;
@@ -65,16 +90,23 @@ public class MCController : MonoBehaviour
     private float defaultGravityScale;
     private bool isDashing;
     private bool isDashRecoiling;
+    private bool hasUsedDoubleJump;
     private int dashDirection = 1;
     private float dashTimeRemaining;
     private float dashRecoilTimeRemaining;
-    private float nextDashTime;
+    private float dashCooldownRemaining;
     private bool isChargingAttack;
     private bool isAttackFullyCharged;
     private bool bulletTimeStartedForCharge;
     private float attackChargeTime;
     private float fullChargeAutoFireCounter;
     private WaterZone currentWaterZone;
+    private WaterZone breathWaterZone;
+    private PlayerRespawn playerRespawn;
+    private float burningTimeRemaining;
+    private float burningDamagePerSecond;
+    private float burningDamageAccumulator;
+    private float freezeTimeRemaining;
 
     public bool IsGrounded { get; private set; }
     public bool IsOnSafeGround { get; private set; }
@@ -82,6 +114,24 @@ public class MCController : MonoBehaviour
     public bool IsDashing { get { return isDashing; } }
     public bool IsDashActive { get { return isDashing || isDashRecoiling; } }
     public bool IsUnderwater { get { return currentWaterZone != null; } }
+    public bool IsBreathPointUnderwater { get { return breathWaterZone != null; } }
+    public bool IsInSwirl
+    {
+        get
+        {
+            PruneInactiveSwirls();
+            return activeSwirls.Count > 0;
+        }
+    }
+
+    public bool IsBurning { get { return isBurning; } }
+    public bool IsFrozen { get { return isFrozen; } }
+    public bool IsPoisoned { get { return isPoisoned; } }
+    public float CurrentStamina { get { return currentStamina; } }
+    public float MaxStamina { get { return maxStamina; } }
+    public int CurrentHp { get { return currentHp; } }
+    public int MaxHp { get { return maxHp; } }
+    public bool IsAlive { get { return currentHp > 0; } }
 
     public Vector2 Velocity
     {
@@ -92,20 +142,34 @@ public class MCController : MonoBehaviour
     {
         body = GetComponent<Rigidbody2D>();
         body.freezeRotation = true;
+        CacheAnimators();
         movementConstraints = body.constraints;
         defaultGravityScale = body.gravityScale;
+        CachePlayerRespawn();
+        RestoreHpToFull();
+        ResetStamina();
         EnsureLayerMasks();
         UpdateMovementContactFilter();
     }
 
     private void Reset()
     {
+        if (breathPoint == null)
+        {
+            Transform foundBreathPoint = transform.Find("BreathPoint");
+            if (foundBreathPoint != null)
+            {
+                breathPoint = foundBreathPoint;
+            }
+        }
+
         EnsureLayerMasks();
     }
 
     private void OnValidate()
     {
         groundContactMinNormalY = Mathf.Clamp01(groundContactMinNormalY);
+        jumpGroundIgnoreTime = Mathf.Max(0f, jumpGroundIgnoreTime);
         idleEdgeSlipInputThreshold = Mathf.Max(0f, idleEdgeSlipInputThreshold);
         dashDistance = Mathf.Max(0f, dashDistance);
         dashDuration = Mathf.Max(0.01f, dashDuration);
@@ -113,13 +177,18 @@ public class MCController : MonoBehaviour
         dashRecoilDistance = Mathf.Max(0f, dashRecoilDistance);
         dashRecoilDuration = Mathf.Max(0.01f, dashRecoilDuration);
         bulletSpawnOffset = Mathf.Max(0f, bulletSpawnOffset);
-        attackDamage = Mathf.Max(1, attackDamage);
+        healthBottleHealAmount = Mathf.Max(0, healthBottleHealAmount);
+        maxHp = Mathf.Max(1, maxHp);
+        currentHp = Mathf.Clamp(currentHp, 0, maxHp);
         minBulletSpeed = Mathf.Max(0f, minBulletSpeed);
         maxBulletSpeed = Mathf.Max(minBulletSpeed, maxBulletSpeed);
         maxChargeTime = Mathf.Max(0.01f, maxChargeTime);
         fullChargeGroundMoveSpeedMultiplier = Mathf.Clamp01(fullChargeGroundMoveSpeedMultiplier);
-        fullChargeAutoFireDelay = Mathf.Max(0f, fullChargeAutoFireDelay);
-        aerialBulletTimeScale = Mathf.Clamp(aerialBulletTimeScale, 0.01f, 1f);
+        aerialBulletTimeScale = Mathf.Clamp(aerialBulletTimeScale, Consts.MinWorldScale, 1f);
+        maxStamina = Mathf.Max(0.01f, maxStamina);
+        staminaDrainPerSecond = Mathf.Max(0f, staminaDrainPerSecond);
+        staminaRecoveryPerSecond = Mathf.Max(0f, staminaRecoveryPerSecond);
+        currentStamina = Mathf.Clamp(currentStamina, 0f, maxStamina);
         EnsureLayerMasks();
         UpdateMovementContactFilter();
     }
@@ -130,7 +199,9 @@ public class MCController : MonoBehaviour
         isDashing = false;
         isDashRecoiling = false;
         waterZones.Clear();
+        activeSwirls.Clear();
         currentWaterZone = null;
+        breathWaterZone = null;
 
         if (body != null)
         {
@@ -141,6 +212,22 @@ public class MCController : MonoBehaviour
 
     private void Update()
     {
+        UpdateElementalStatuses(Time.deltaTime);
+        UpdateStamina();
+
+        if (isFrozen)
+        {
+            inputX = 0f;
+            inputY = 0f;
+            jumpHeld = false;
+            if (bulletTimeStartedForCharge && fullChargeAutoFireCounter > 0f)
+            {
+                GameTime.SetSlow(this, aerialBulletTimeScale, fullChargeAutoFireCounter);
+            }
+
+            return;
+        }
+
         if (inputLocked)
         {
             inputX = 0f;
@@ -149,6 +236,8 @@ public class MCController : MonoBehaviour
             CancelAttackCharge();
             return;
         }
+
+        UpdateDashCooldown(Time.deltaTime);
 
         inputX = Input.GetAxisRaw("Horizontal");
         inputY = Input.GetAxisRaw("Vertical");
@@ -162,6 +251,11 @@ public class MCController : MonoBehaviour
         if (Input.GetKeyDown(dashKey))
         {
             TryStartDash();
+        }
+
+        if (Input.GetKeyDown(useHealthBottleKey))
+        {
+            TryUseHealthBottle();
         }
 
         UpdateAttackCharge();
@@ -178,7 +272,14 @@ public class MCController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        bool wasGroundedOnSlope = IsGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal);
         UpdateGroundedState();
+
+        if (isFrozen)
+        {
+            ApplyFrozenPhysics();
+            return;
+        }
 
         if (isDashing)
         {
@@ -192,6 +293,11 @@ public class MCController : MonoBehaviour
             return;
         }
 
+        if (ApplySwirlMovement())
+        {
+            return;
+        }
+
         if (IsUnderwater)
         {
             ApplyUnderwaterMovement();
@@ -201,9 +307,15 @@ public class MCController : MonoBehaviour
         ApplyWorldGravityScale();
         UpdateTimers();
         ApplyMovement();
-        ApplyJump();
+        bool jumped = ApplyJump();
+        if (!jumped)
+        {
+            PreventSlopeExitLaunch(wasGroundedOnSlope);
+        }
+
         ApplyExtraGravity();
         ApplyIdleEdgeSlipLock();
+        ApplyMovingPlatformMotion();
     }
 
     public void SetInputLocked(bool locked)
@@ -214,6 +326,7 @@ public class MCController : MonoBehaviour
             inputX = 0f;
             inputY = 0f;
             jumpBufferCounter = 0f;
+            groundIgnoreCounter = 0f;
             CancelAttackCharge();
             StopDash();
         }
@@ -221,6 +334,10 @@ public class MCController : MonoBehaviour
 
     public void TeleportTo(Vector3 position, int facingDirection)
     {
+        ClearWaterState();
+        activeSwirls.Clear();
+        hasUsedDoubleJump = false;
+        groundIgnoreCounter = 0f;
         transform.position = position;
         SetFacingDirection(facingDirection);
         ClearVelocity();
@@ -243,9 +360,151 @@ public class MCController : MonoBehaviour
         }
     }
 
+    public void EnterSwirl(Swirl swirl)
+    {
+        if (swirl != null && !activeSwirls.Contains(swirl))
+        {
+            activeSwirls.Add(swirl);
+        }
+    }
+
+    public void ExitSwirl(Swirl swirl)
+    {
+        if (swirl != null)
+        {
+            activeSwirls.Remove(swirl);
+        }
+
+        if (!IsInSwirl && !isDashing && !isDashRecoiling && !isFrozen)
+        {
+            RestoreGravity();
+        }
+    }
+
+    public bool TakeDamage(int amount)
+    {
+        if (amount <= 0 || !IsAlive)
+        {
+            return false;
+        }
+
+        currentHp = Mathf.Max(0, currentHp - amount);
+        if (currentHp <= 0)
+        {
+            DieFromDamage();
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool Heal(int amount)
+    {
+        if (amount <= 0 || !IsAlive || currentHp >= maxHp)
+        {
+            return false;
+        }
+
+        currentHp = Mathf.Min(maxHp, currentHp + amount);
+        return true;
+    }
+
+    public void RestoreHpToFull()
+    {
+        currentHp = maxHp;
+    }
+
+    public void IncreaseMaxHp(int amount)
+    {
+        if (amount <= 0)
+        {
+            return;
+        }
+
+        maxHp += amount;
+        RestoreHpToFull();
+    }
+
+    public void ResetStamina()
+    {
+        currentStamina = maxStamina;
+    }
+
+    public void IncreaseMaxStamina(float amount)
+    {
+        if (amount <= 0f)
+        {
+            return;
+        }
+
+        maxStamina += amount;
+        ResetStamina();
+    }
+
+    public void ApplyBurning(int sourceDamage)
+    {
+        if (!IsAlive || sourceDamage <= 0)
+        {
+            return;
+        }
+
+        isBurning = true;
+        burningTimeRemaining = Consts.BurningDuration;
+        burningDamagePerSecond = Mathf.Max(burningDamagePerSecond, sourceDamage * Consts.BurningDamagePerSecondRatio);
+    }
+
+    public void ApplyFrozen()
+    {
+        if (!IsAlive)
+        {
+            return;
+        }
+
+        isFrozen = true;
+        freezeTimeRemaining = Consts.FreezeDuration;
+        inputX = 0f;
+        inputY = 0f;
+        jumpHeld = false;
+        jumpBufferCounter = 0f;
+        coyoteCounter = 0f;
+        StopDash();
+        ApplyAnimatorSpeed();
+    }
+
+    public void ApplyPoisoned()
+    {
+        if (IsAlive)
+        {
+            isPoisoned = true;
+        }
+    }
+
+    public void ClearElementalStatuses()
+    {
+        isBurning = false;
+        isFrozen = false;
+        isPoisoned = false;
+        burningTimeRemaining = 0f;
+        burningDamagePerSecond = 0f;
+        burningDamageAccumulator = 0f;
+        freezeTimeRemaining = 0f;
+        ApplyAnimatorSpeed();
+    }
+
     public Collider2D GetCurrentGround()
     {
         return currentGround;
+    }
+
+    public bool TryUseHealthBottle()
+    {
+        if (GameController.Instance == null || !GameController.Instance.TryUseHealthBottle())
+        {
+            return false;
+        }
+
+        Heal(healthBottleHealAmount);
+        return true;
     }
 
     private void ApplyMovement()
@@ -257,15 +516,29 @@ public class MCController : MonoBehaviour
             currentMoveSpeed *= fullChargeGroundMoveSpeedMultiplier;
         }
 
-        velocity.x = inputX * currentMoveSpeed * GameTime.WorldScale;
+        float horizontalSpeed = inputX * currentMoveSpeed * GameTime.WorldScale;
+        if (IsGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal))
+        {
+            velocity = SlopeMovement.GetSurfaceVelocityForHorizontalSpeed(horizontalSpeed, currentGroundNormal);
+        }
+        else
+        {
+            velocity.x = horizontalSpeed;
+        }
+
         body.velocity = velocity;
     }
 
-    private void ApplyJump()
+    private bool ApplyJump()
     {
-        if (jumpBufferCounter <= 0f || coyoteCounter <= 0f)
+        if (jumpBufferCounter <= 0f)
         {
-            return;
+            return false;
+        }
+
+        if (coyoteCounter <= 0f)
+        {
+            return TryApplyDoubleJump();
         }
 
         Vector2 velocity = body.velocity;
@@ -273,8 +546,51 @@ public class MCController : MonoBehaviour
         body.velocity = velocity;
         jumpBufferCounter = 0f;
         coyoteCounter = 0f;
+        groundIgnoreCounter = jumpGroundIgnoreTime;
+        hasUsedDoubleJump = false;
         IsGrounded = false;
         IsOnSafeGround = false;
+        currentGroundNormal = Vector2.up;
+        return true;
+    }
+
+    private bool TryApplyDoubleJump()
+    {
+        if (IsInSwirl)
+        {
+            jumpBufferCounter = 0f;
+            return false;
+        }
+
+        if (!CanDoubleJump())
+        {
+            return false;
+        }
+
+        Vector2 velocity = body.velocity;
+        velocity.y = jumpVelocity * GameTime.WorldScale;
+        body.velocity = velocity;
+        jumpBufferCounter = 0f;
+        coyoteCounter = 0f;
+        groundIgnoreCounter = jumpGroundIgnoreTime;
+        hasUsedDoubleJump = true;
+        IsGrounded = false;
+        IsOnSafeGround = false;
+        currentGroundNormal = Vector2.up;
+        return true;
+    }
+
+    private bool CanDoubleJump()
+    {
+        return GameController.Instance != null
+            && GameController.Instance.CanDoubleJump
+            && !hasUsedDoubleJump
+            && !IsUnderwater
+            && !IsInSwirl
+            && !inputLocked
+            && !isFrozen
+            && !isDashing
+            && !isDashRecoiling;
     }
 
     private void ApplyUnderwaterMovement()
@@ -302,8 +618,185 @@ public class MCController : MonoBehaviour
         body.velocity = Vector2.MoveTowards(body.velocity, targetVelocity, rate * GameTime.FixedDeltaTime);
     }
 
+    private bool ApplySwirlMovement()
+    {
+        PruneInactiveSwirls();
+        if (activeSwirls.Count == 0)
+        {
+            return false;
+        }
+
+        Swirl swirl = activeSwirls[activeSwirls.Count - 1];
+        if (swirl == null)
+        {
+            return false;
+        }
+
+        body.gravityScale = 0f;
+        coyoteCounter = 0f;
+        jumpBufferCounter = 0f;
+        SetEdgeSlipLock(false);
+
+        Vector2 velocity = body.velocity;
+        float forcedSpeed = swirl.Speed * GameTime.WorldScale;
+        float controlSpeed = moveSpeed * GameTime.WorldScale;
+        switch (swirl.ForceDirection)
+        {
+            case GameDirection.Down:
+                velocity.y = -forcedSpeed;
+                velocity.x = inputX * controlSpeed;
+                break;
+            case GameDirection.Left:
+                velocity.x = -forcedSpeed;
+                velocity.y = inputY * controlSpeed;
+                break;
+            case GameDirection.Right:
+                velocity.x = forcedSpeed;
+                velocity.y = inputY * controlSpeed;
+                break;
+            case GameDirection.Up:
+            default:
+                velocity.y = forcedSpeed;
+                velocity.x = inputX * controlSpeed;
+                break;
+        }
+
+        body.velocity = velocity;
+        return true;
+    }
+
+    private void ApplyFrozenPhysics()
+    {
+        if (body == null)
+        {
+            return;
+        }
+
+        coyoteCounter = 0f;
+        jumpBufferCounter = 0f;
+        SetEdgeSlipLock(false);
+        body.gravityScale = IsUnderwater
+            ? defaultGravityScale * Consts.FrozenWaterBuoyancyGravityScale * GameTime.WorldScale
+            : defaultGravityScale * GameTime.WorldScale;
+        body.velocity = new Vector2(0f, body.velocity.y);
+    }
+
+    private void UpdateElementalStatuses(float deltaTime)
+    {
+        if (deltaTime <= 0f)
+        {
+            return;
+        }
+
+        UpdateBurning(deltaTime);
+        UpdateFrozen(deltaTime);
+    }
+
+    private void UpdateBurning(float deltaTime)
+    {
+        if (!isBurning)
+        {
+            return;
+        }
+
+        burningTimeRemaining -= deltaTime;
+        burningDamageAccumulator += burningDamagePerSecond * deltaTime;
+        int damageToApply = Mathf.FloorToInt(burningDamageAccumulator);
+        if (damageToApply > 0)
+        {
+            burningDamageAccumulator -= damageToApply;
+            TakeDamage(damageToApply);
+        }
+
+        if (burningTimeRemaining <= 0f || !IsAlive)
+        {
+            isBurning = false;
+            burningTimeRemaining = 0f;
+            burningDamagePerSecond = 0f;
+            burningDamageAccumulator = 0f;
+        }
+    }
+
+    private void UpdateFrozen(float deltaTime)
+    {
+        if (!isFrozen)
+        {
+            return;
+        }
+
+        freezeTimeRemaining -= deltaTime;
+        if (freezeTimeRemaining > 0f)
+        {
+            return;
+        }
+
+        isFrozen = false;
+        freezeTimeRemaining = 0f;
+        RestoreGravity();
+        ApplyAnimatorSpeed();
+    }
+
+    private void UpdateDashCooldown(float deltaTime)
+    {
+        if (dashCooldownRemaining > 0f)
+        {
+            dashCooldownRemaining = Mathf.Max(0f, dashCooldownRemaining - deltaTime);
+        }
+    }
+
+    private void UpdateStamina()
+    {
+        breathWaterZone = WaterZone.GetZoneAtPoint(GetBreathPointPosition());
+        float deltaTime = GameTime.DeltaTime;
+        if (breathWaterZone != null)
+        {
+            currentStamina = Mathf.MoveTowards(currentStamina, 0f, staminaDrainPerSecond * deltaTime);
+            if (currentStamina <= 0f)
+            {
+                DieFromDrowning();
+            }
+
+            return;
+        }
+
+        currentStamina = Mathf.MoveTowards(currentStamina, maxStamina, staminaRecoveryPerSecond * deltaTime);
+    }
+
+    private Vector2 GetBreathPointPosition()
+    {
+        if (breathPoint != null)
+        {
+            return breathPoint.position;
+        }
+
+        return (Vector2)transform.position + breathPointFallbackOffset;
+    }
+
+    private void DieFromDrowning()
+    {
+        CachePlayerRespawn();
+        if (playerRespawn != null)
+        {
+            playerRespawn.DieFromEnemy(true);
+        }
+    }
+
+    private void DieFromDamage()
+    {
+        CachePlayerRespawn();
+        if (playerRespawn != null)
+        {
+            playerRespawn.DieFromEnemy(true);
+        }
+    }
+
     private void ApplyExtraGravity()
     {
+        if (IsGrounded)
+        {
+            return;
+        }
+
         Vector2 velocity = body.velocity;
         if (velocity.y < 0f)
         {
@@ -341,7 +834,33 @@ public class MCController : MonoBehaviour
             return false;
         }
 
+        if (GetCurrentMovingPlatform() != null)
+        {
+            return false;
+        }
+
         return true;
+    }
+
+    private void ApplyMovingPlatformMotion()
+    {
+        if (body == null || !IsGrounded)
+        {
+            return;
+        }
+
+        MovingPlatform movingPlatform = GetCurrentMovingPlatform();
+        if (movingPlatform == null || movingPlatform.CurrentDelta.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        body.position += movingPlatform.CurrentDelta;
+    }
+
+    private MovingPlatform GetCurrentMovingPlatform()
+    {
+        return currentGround != null ? currentGround.GetComponentInParent<MovingPlatform>() : null;
     }
 
     private void UpdateTimers()
@@ -374,7 +893,7 @@ public class MCController : MonoBehaviour
         if (!isAttackFullyCharged && attackChargeTime >= maxChargeTime)
         {
             isAttackFullyCharged = true;
-            fullChargeAutoFireCounter = fullChargeAutoFireDelay;
+            fullChargeAutoFireCounter = GetFullChargeHoldDuration();
         }
 
         if (isAttackFullyCharged)
@@ -400,7 +919,7 @@ public class MCController : MonoBehaviour
         isAttackFullyCharged = false;
         bulletTimeStartedForCharge = false;
         attackChargeTime = 0f;
-        fullChargeAutoFireCounter = fullChargeAutoFireDelay;
+        fullChargeAutoFireCounter = 0f;
         GameTime.ClearSlow(this);
     }
 
@@ -422,7 +941,8 @@ public class MCController : MonoBehaviour
         if (bullet != null)
         {
             float bulletSpeed = Mathf.Lerp(minBulletSpeed, maxBulletSpeed, chargeRatio);
-            bullet.Configure(BulletSource.Player, shotDirection, bulletSpeed, attackDamage, !fullChargeShot, fullChargeShot);
+            bool bulletIsPiercing = fullChargeShot && bulletElement != BulletElement.Fire;
+            bullet.Configure(BulletSource.Player, shotDirection, bulletSpeed, !fullChargeShot, bulletIsPiercing, bulletElement, fullChargeShot);
         }
 
         FinishAttackCharge();
@@ -455,13 +975,18 @@ public class MCController : MonoBehaviour
 
     private void TryStartAerialBulletTime()
     {
-        if (bulletTimeStartedForCharge || IsGrounded || fullChargeAutoFireDelay <= 0f)
+        if (bulletTimeStartedForCharge || IsGrounded || fullChargeAutoFireCounter <= 0f)
         {
             return;
         }
 
         bulletTimeStartedForCharge = true;
-        GameTime.SetSlow(this, aerialBulletTimeScale, fullChargeAutoFireDelay);
+        GameTime.SetSlow(this, aerialBulletTimeScale, fullChargeAutoFireCounter);
+    }
+
+    private float GetFullChargeHoldDuration()
+    {
+        return Mathf.Max(0f, currentStamina);
     }
 
     private Vector2 GetMouseAimDirection(Vector3 origin)
@@ -517,14 +1042,14 @@ public class MCController : MonoBehaviour
 
     private void TryStartDash()
     {
-        if (body == null || inputLocked || isDashing || isDashRecoiling || Time.time < nextDashTime)
+        if (body == null || inputLocked || isFrozen || isDashing || isDashRecoiling || dashCooldownRemaining > 0f)
         {
             return;
         }
 
         dashDirection = FacingDirection == GameDirection.Left ? -1 : 1;
         dashTimeRemaining = dashDuration;
-        nextDashTime = Time.time + dashCooldown;
+        dashCooldownRemaining = dashCooldown;
         isDashing = true;
         isDashRecoiling = false;
         jumpBufferCounter = 0f;
@@ -622,6 +1147,41 @@ public class MCController : MonoBehaviour
         body.gravityScale = 0f;
     }
 
+    private void CacheAnimators()
+    {
+        animators = GetComponentsInChildren<Animator>(true);
+    }
+
+    private void ApplyAnimatorSpeed()
+    {
+        if (animators == null || animators.Length == 0)
+        {
+            CacheAnimators();
+        }
+
+        if (animators == null)
+        {
+            return;
+        }
+
+        float animatorSpeed = isFrozen ? 0f : GameTime.WorldScale;
+        for (int i = 0; i < animators.Length; i++)
+        {
+            if (animators[i] != null)
+            {
+                animators[i].speed = animatorSpeed;
+            }
+        }
+    }
+
+    private void CachePlayerRespawn()
+    {
+        if (playerRespawn == null)
+        {
+            playerRespawn = GetComponent<PlayerRespawn>();
+        }
+    }
+
     private void RestoreGravity()
     {
         if (IsUnderwater)
@@ -640,62 +1200,64 @@ public class MCController : MonoBehaviour
 
     private void UpdateGroundedState()
     {
-        Vector2 center = (Vector2)transform.position + groundCheckOffset;
-        currentGround = Physics2D.OverlapBox(center, groundCheckSize, 0f, movementGroundMask);
-        if (currentGround == null)
+        if (ShouldIgnoreGroundAfterJump())
         {
-            currentGround = FindSupportContactGround();
+            currentGround = null;
+            currentGroundNormal = Vector2.up;
+            IsGrounded = false;
+            IsOnSafeGround = false;
+            groundIgnoreCounter = Mathf.Max(0f, groundIgnoreCounter - Time.fixedDeltaTime);
+            return;
+        }
+
+        groundIgnoreCounter = 0f;
+
+        GroundSupport support;
+        if (SlopeMovement.TryFindSupport(
+            body,
+            movementContactFilter,
+            supportContacts,
+            groundContactMinNormalY,
+            transform.position.y,
+            movementGroundMask,
+            out support))
+        {
+            currentGround = support.Collider;
+            currentGroundNormal = support.Normal;
+        }
+        else
+        {
+            Vector2 center = (Vector2)transform.position + groundCheckOffset;
+            currentGround = Physics2D.OverlapBox(center, groundCheckSize, 0f, movementGroundMask);
+            currentGroundNormal = Vector2.up;
         }
 
         IsGrounded = currentGround != null;
-        IsOnSafeGround = IsGrounded && IsColliderOnMask(currentGround, safeGroundMask);
+        IsOnSafeGround = IsGrounded && Utils.IsColliderOnMask(currentGround, safeGroundMask);
+        if (IsGrounded && !IsUnderwater)
+        {
+            hasUsedDoubleJump = false;
+        }
     }
 
-    private Collider2D FindSupportContactGround()
+    private bool ShouldIgnoreGroundAfterJump()
     {
-        if (body == null)
+        return groundIgnoreCounter > 0f && body != null && body.velocity.y > 0f;
+    }
+
+    private void PreventSlopeExitLaunch(bool wasGroundedOnSlope)
+    {
+        if (!wasGroundedOnSlope || IsGrounded || body == null || body.velocity.y <= 0f)
         {
-            return null;
+            return;
         }
 
-        int contactCount = body.GetContacts(movementContactFilter, supportContacts);
-        float playerCenterY = transform.position.y;
-        for (int i = 0; i < contactCount; i++)
-        {
-            ContactPoint2D contact = supportContacts[i];
-            if (contact.point.y > playerCenterY)
-            {
-                continue;
-            }
-
-            if (Mathf.Abs(contact.normal.y) < groundContactMinNormalY)
-            {
-                continue;
-            }
-
-            Collider2D ground = GetGroundColliderFromContact(contact);
-            if (ground != null)
-            {
-                return ground;
-            }
-        }
-
-        return null;
+        body.velocity = new Vector2(body.velocity.x, 0f);
     }
 
     private void SetFacingDirection(int facingDirection)
     {
         FacingDirection = GameDirection.NormalizeOrDefault(facingDirection, FacingDirection);
-    }
-
-    private static bool IsColliderOnMask(Collider2D collider2D, LayerMask mask)
-    {
-        return collider2D != null && (mask.value & (1 << collider2D.gameObject.layer)) != 0;
-    }
-
-    private static bool IsLayerInMask(int layer, LayerMask mask)
-    {
-        return (mask.value & (1 << layer)) != 0;
     }
 
     private void EnsureLayerMasks()
@@ -712,8 +1274,22 @@ public class MCController : MonoBehaviour
 
         if (dashStopMask == 0)
         {
-            dashStopMask = LayerMask.GetMask(GameLayers.Ground, GameLayers.Obstacle, GameLayers.Platform, GameLayers.Enemy);
+            dashStopMask = LayerMask.GetMask(GameLayers.Ground, GameLayers.Obstacle, GameLayers.PierceObstacle, GameLayers.Platform, GameLayers.Enemy);
         }
+
+        IncludePierceObstacleWithObstacleDashMask();
+    }
+
+    private void IncludePierceObstacleWithObstacleDashMask()
+    {
+        int obstacleLayer = LayerMask.NameToLayer(GameLayers.Obstacle);
+        int pierceObstacleLayer = LayerMask.NameToLayer(GameLayers.PierceObstacle);
+        if (obstacleLayer < 0 || pierceObstacleLayer < 0 || !Utils.IsLayerInMask(obstacleLayer, dashStopMask))
+        {
+            return;
+        }
+
+        dashStopMask.value |= 1 << pierceObstacleLayer;
     }
 
     private void UpdateMovementContactFilter()
@@ -722,19 +1298,16 @@ public class MCController : MonoBehaviour
         movementContactFilter.SetLayerMask(movementGroundMask);
     }
 
-    private Collider2D GetGroundColliderFromContact(ContactPoint2D contact)
+    private void PruneInactiveSwirls()
     {
-        if (IsColliderOnMask(contact.collider, movementGroundMask))
+        for (int i = activeSwirls.Count - 1; i >= 0; i--)
         {
-            return contact.collider;
+            Swirl swirl = activeSwirls[i];
+            if (swirl == null || !swirl.isActiveAndEnabled || !swirl.IsActive)
+            {
+                activeSwirls.RemoveAt(i);
+            }
         }
-
-        if (IsColliderOnMask(contact.otherCollider, movementGroundMask))
-        {
-            return contact.otherCollider;
-        }
-
-        return null;
     }
 
     private void SetEdgeSlipLock(bool active)
@@ -762,19 +1335,19 @@ public class MCController : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
-        EnterWater(GetWaterZone(other));
+        EnterWater(Utils.GetWaterZone(other));
         HandleDashTrigger(other);
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
-        EnterWater(GetWaterZone(other));
+        EnterWater(Utils.GetWaterZone(other));
         HandleDashTrigger(other);
     }
 
     private void OnTriggerExit2D(Collider2D other)
     {
-        ExitWater(GetWaterZone(other));
+        ExitWater(Utils.GetWaterZone(other));
     }
 
     private void HandleDashCollision(Collision2D collision)
@@ -784,8 +1357,8 @@ public class MCController : MonoBehaviour
             return;
         }
 
-        bool hitEnemy = IsEnemyCollider(collision.collider);
-        if (!hitEnemy && !IsLayerInMask(collision.collider.gameObject.layer, dashStopMask))
+        bool hitEnemy = Utils.IsEnemyCollider(collision.collider);
+        if (!hitEnemy && !Utils.IsLayerInMask(collision.collider.gameObject.layer, dashStopMask))
         {
             return;
         }
@@ -803,7 +1376,7 @@ public class MCController : MonoBehaviour
             return;
         }
 
-        if (IsEnemyCollider(other))
+        if (Utils.IsEnemyCollider(other))
         {
             StopDashWithRecoil();
         }
@@ -826,6 +1399,17 @@ public class MCController : MonoBehaviour
         jumpBufferCounter = 0f;
         coyoteCounter = 0f;
         SetEdgeSlipLock(false);
+    }
+
+    private void ClearWaterState()
+    {
+        waterZones.Clear();
+        currentWaterZone = null;
+        breathWaterZone = null;
+        if (body != null)
+        {
+            RestoreGravity();
+        }
     }
 
     private void ExitWater(WaterZone waterZone)
@@ -851,18 +1435,6 @@ public class MCController : MonoBehaviour
         }
     }
 
-    private static WaterZone GetWaterZone(Collider2D other)
-    {
-        return other != null ? other.GetComponentInParent<WaterZone>() : null;
-    }
-
-    private static bool IsEnemyCollider(Collider2D collider2D)
-    {
-        return collider2D != null
-            && (collider2D.gameObject.layer == LayerMask.NameToLayer(GameLayers.Enemy)
-                || collider2D.GetComponentInParent<EnemyController>() != null);
-    }
-
     private bool HasDashBlockingNormal(Collision2D collision)
     {
         for (int i = 0; i < collision.contactCount; i++)
@@ -883,4 +1455,121 @@ public class MCController : MonoBehaviour
         Vector2 center = (Vector2)transform.position + groundCheckOffset;
         Gizmos.DrawWireCube(center, groundCheckSize);
     }
+}
+
+public struct GroundSupport
+{
+    public readonly Collider2D Collider;
+    public readonly Vector2 Normal;
+
+    public GroundSupport(Collider2D collider, Vector2 normal)
+    {
+        Collider = collider;
+        Normal = normal;
+    }
+}
+
+public static class SlopeMovement
+{
+    private const float SlopeNormalXEpsilon = 0.01f;
+    private const float MinTangentX = 0.001f;
+
+    public static bool IsSlopeNormal(Vector2 normal)
+    {
+        normal = SanitizeGroundNormal(normal);
+        return normal.y > 0f && Mathf.Abs(normal.x) > SlopeNormalXEpsilon;
+    }
+
+    public static Vector2 GetSurfaceVelocityForHorizontalSpeed(float horizontalSpeed, Vector2 normal)
+    {
+        normal = SanitizeGroundNormal(normal);
+        Vector2 tangent = new Vector2(normal.y, -normal.x);
+        if (Mathf.Abs(tangent.x) < MinTangentX)
+        {
+            return new Vector2(horizontalSpeed, 0f);
+        }
+
+        return tangent * (horizontalSpeed / tangent.x);
+    }
+
+    public static bool TryFindSupport(
+        Rigidbody2D body,
+        ContactFilter2D filter,
+        ContactPoint2D[] contacts,
+        float minNormalY,
+        float maxSupportPointY,
+        LayerMask groundMask,
+        out GroundSupport support)
+    {
+        support = new GroundSupport(null, Vector2.up);
+        if (body == null || contacts == null)
+        {
+            return false;
+        }
+
+        int contactCount = body.GetContacts(filter, contacts);
+        float bestNormalY = -1f;
+        Collider2D bestCollider = null;
+        Vector2 bestNormal = Vector2.up;
+
+        for (int i = 0; i < contactCount; i++)
+        {
+            ContactPoint2D contact = contacts[i];
+            if (contact.point.y > maxSupportPointY)
+            {
+                continue;
+            }
+
+            Vector2 normal = SanitizeGroundNormal(contact.normal);
+            if (normal.y < minNormalY)
+            {
+                continue;
+            }
+
+            Collider2D ground = GetGroundColliderFromContact(contact, groundMask);
+            if (ground == null || normal.y <= bestNormalY)
+            {
+                continue;
+            }
+
+            bestCollider = ground;
+            bestNormal = normal;
+            bestNormalY = normal.y;
+        }
+
+        if (bestCollider == null)
+        {
+            return false;
+        }
+
+        support = new GroundSupport(bestCollider, bestNormal);
+        return true;
+    }
+
+    private static Vector2 SanitizeGroundNormal(Vector2 normal)
+    {
+        if (normal.sqrMagnitude <= 0.0001f)
+        {
+            return Vector2.up;
+        }
+
+        normal.Normalize();
+        return normal.y < 0f ? -normal : normal;
+    }
+
+    private static Collider2D GetGroundColliderFromContact(ContactPoint2D contact, LayerMask groundMask)
+    {
+        if (Utils.IsColliderOnMask(contact.collider, groundMask))
+        {
+            return contact.collider;
+        }
+
+        if (Utils.IsColliderOnMask(contact.otherCollider, groundMask))
+        {
+            return contact.otherCollider;
+        }
+
+        return null;
+    }
+
 }

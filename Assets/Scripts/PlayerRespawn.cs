@@ -23,6 +23,11 @@ public class PlayerRespawn : MonoBehaviour
     [SerializeField] private LayerMask hazardMask;
     [SerializeField] private LayerMask enemyMask;
 
+    [Header("Elemental Status")]
+    [SerializeField] private bool isBurning;
+    [SerializeField] private bool isFrozen;
+    [SerializeField] private bool isPoisoned;
+
     private Room lastSafeRoom;
     private Vector3 lastSafePosition;
     private int lastSafeFacing = GameDirection.Right;
@@ -54,6 +59,21 @@ public class PlayerRespawn : MonoBehaviour
         get { return currentCheckpoint; }
     }
 
+    public bool IsBurning
+    {
+        get { return player != null ? player.IsBurning : isBurning; }
+    }
+
+    public bool IsFrozen
+    {
+        get { return player != null ? player.IsFrozen : isFrozen; }
+    }
+
+    public bool IsPoisoned
+    {
+        get { return player != null ? player.IsPoisoned : isPoisoned; }
+    }
+
     private void Awake()
     {
         CacheReferences();
@@ -71,6 +91,7 @@ public class PlayerRespawn : MonoBehaviour
     private void Update()
     {
         RecordSafeGround(false);
+        SyncElementalStatusesFromPlayer();
     }
 
     public void SetCheckpoint(Checkpoint checkpoint)
@@ -93,9 +114,9 @@ public class PlayerRespawn : MonoBehaviour
         currentCheckpoint = null;
     }
 
-    public void DieFromHazard()
+    public void DieFromHazard(bool ignoreInvulnerability = false)
     {
-        if (isRespawning || IsInvulnerable)
+        if (isRespawning || (!ignoreInvulnerability && IsInvulnerable))
         {
             return;
         }
@@ -108,15 +129,16 @@ public class PlayerRespawn : MonoBehaviour
         StartCoroutine(RespawnRoutine(lastSafeRoom, lastSafePosition, GameDirection.NormalizeOrDefault(lastSafeFacing), false));
     }
 
-    public void DieFromEnemy()
+    public void DieFromEnemy(bool ignoreInvulnerability = false)
     {
-        if (isRespawning || IsInvulnerable)
+        if (isRespawning || (!ignoreInvulnerability && IsInvulnerable))
         {
             return;
         }
 
         if (currentCamp != null)
         {
+            Utils.RestoreHealthBottles();
             StartCoroutine(RespawnRoutine(currentCamp.Room, currentCamp.RespawnPosition, currentCamp.FacingDirection, true));
             return;
         }
@@ -127,7 +149,23 @@ public class PlayerRespawn : MonoBehaviour
             return;
         }
 
-        DieFromHazard();
+        DieFromHazard(ignoreInvulnerability);
+    }
+
+    public bool TakeDamageFromEnemy(int damage)
+    {
+        if (isRespawning || IsInvulnerable || player == null)
+        {
+            return false;
+        }
+
+        bool died = player.TakeDamage(damage);
+        if (!died)
+        {
+            StartInvulnerability(hitInvulnerabilityDuration);
+        }
+
+        return true;
     }
 
     public void TakeEnemyMeleeHit(EnemyController enemy, Vector2 knockbackDirection)
@@ -142,6 +180,12 @@ public class PlayerRespawn : MonoBehaviour
             return;
         }
 
+        bool died = player != null && player.TakeDamage(enemy.ContactDamage);
+        if (died)
+        {
+            return;
+        }
+
         StartInvulnerability(hitInvulnerabilityDuration);
 
         float distance = enemy.ContactKnockbackDistance;
@@ -151,11 +195,46 @@ public class PlayerRespawn : MonoBehaviour
         }
     }
 
+    public void ApplyBurning(int sourceDamage)
+    {
+        if (!isRespawning)
+        {
+            isBurning = true;
+            if (player != null)
+            {
+                player.ApplyBurning(sourceDamage);
+            }
+        }
+    }
+
+    public void ApplyFrozen()
+    {
+        if (!isRespawning)
+        {
+            isFrozen = true;
+            if (player != null)
+            {
+                player.ApplyFrozen();
+            }
+        }
+    }
+
+    public void ApplyPoisoned()
+    {
+        if (!isRespawning)
+        {
+            isPoisoned = true;
+        }
+    }
+
     private IEnumerator RespawnRoutine(Room targetRoom, Vector3 targetPosition, int facingDirection, bool reviveEnemies)
     {
         isRespawning = true;
         player.SetInputLocked(true);
         player.ClearVelocity();
+        player.RestoreHpToFull();
+        player.ResetStamina();
+        ClearElementalStatuses();
 
         if (targetRoom != null && roomManager != null)
         {
@@ -183,6 +262,29 @@ public class PlayerRespawn : MonoBehaviour
 
         player.SetInputLocked(false);
         isRespawning = false;
+    }
+
+    private void ClearElementalStatuses()
+    {
+        isBurning = false;
+        isFrozen = false;
+        isPoisoned = false;
+        if (player != null)
+        {
+            player.ClearElementalStatuses();
+        }
+    }
+
+    private void SyncElementalStatusesFromPlayer()
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        isBurning = player.IsBurning;
+        isFrozen = player.IsFrozen;
+        isPoisoned = player.IsPoisoned;
     }
 
     private void RecordSafeGround(bool force)
@@ -222,6 +324,14 @@ public class PlayerRespawn : MonoBehaviour
         HandleDeathCollider(other);
     }
 
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        if (Utils.IsPoisonousWater(other))
+        {
+            DieFromHazard();
+        }
+    }
+
     private void OnCollisionEnter2D(Collision2D collision)
     {
         HandleDeathCollider(collision.collider);
@@ -234,13 +344,13 @@ public class PlayerRespawn : MonoBehaviour
             return;
         }
 
-        if (IsLayerInMask(other.gameObject.layer, hazardMask))
+        if (Utils.IsLayerInMask(other.gameObject.layer, hazardMask) || Utils.IsPoisonousWater(other))
         {
             DieFromHazard();
             return;
         }
 
-        if (IsLayerInMask(other.gameObject.layer, enemyMask))
+        if (Utils.IsLayerInMask(other.gameObject.layer, enemyMask))
         {
             EnemyController enemy = other.GetComponentInParent<EnemyController>();
             if (enemy != null)
@@ -285,11 +395,6 @@ public class PlayerRespawn : MonoBehaviour
         {
             enemyMask = LayerMask.GetMask(GameLayers.Enemy);
         }
-    }
-
-    private static bool IsLayerInMask(int layer, LayerMask mask)
-    {
-        return (mask.value & (1 << layer)) != 0;
     }
 
     private void StartInvulnerability(float duration)

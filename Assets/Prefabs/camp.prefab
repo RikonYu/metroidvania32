@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 7766801322008129031}
   - component: {fileID: 7766801322008129028}
   - component: {fileID: 7766801322008129029}
+  - component: {fileID: 8137308731547197114}
   m_Layer: 12
   m_Name: camp
   m_TagString: Untagged
@@ -125,6 +126,21 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   room: {fileID: 0}
-  facingDirection: 1
+  facingDirection: 6
   activateOnPlayerTouch: 1
   drawGizmos: 1
+--- !u!114 &8137308731547197114
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7766801322008129026}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af0826fe8ba44344b9915c4fd7224ff0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  checkpoint: {fileID: 7766801322008129029}
+  interactKey: 101
+  reviveEnemiesOnSave: 1

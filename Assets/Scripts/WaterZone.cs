@@ -18,8 +18,12 @@ public class WaterZone : MonoBehaviour
     [Header("Enemies")]
     [SerializeField] private bool killNonUnderwaterEnemies = true;
 
+    [Header("Death")]
+    [SerializeField] private bool isPoisonous;
+
     [Header("Editor")]
     [SerializeField] private Color gizmoColor = new Color(0f, 0.45f, 1f, 0.25f);
+    [SerializeField] private Color poisonousGizmoColor = new Color(0.65f, 0f, 1f, 0.3f);
 
     public float PlayerHorizontalSwimSpeed { get { return playerHorizontalSwimSpeed; } }
     public float PlayerVerticalSwimSpeed { get { return playerVerticalSwimSpeed; } }
@@ -28,6 +32,7 @@ public class WaterZone : MonoBehaviour
     public float WaterExitBoost { get { return waterExitBoost; } }
     public float BulletDrag { get { return bulletDrag; } }
     public bool KillNonUnderwaterEnemies { get { return killNonUnderwaterEnemies; } }
+    public bool IsPoisonous { get { return isPoisonous; } }
 
     private Collider2D waterCollider;
 
@@ -136,9 +141,11 @@ public class WaterZone : MonoBehaviour
             return;
         }
 
-        Gizmos.color = gizmoColor;
+        Color activeGizmoColor = isPoisonous ? poisonousGizmoColor : gizmoColor;
+
+        Gizmos.color = activeGizmoColor;
         Gizmos.DrawCube(waterCollider.bounds.center, waterCollider.bounds.size);
-        Gizmos.color = new Color(gizmoColor.r, gizmoColor.g, gizmoColor.b, 0.85f);
+        Gizmos.color = new Color(activeGizmoColor.r, activeGizmoColor.g, activeGizmoColor.b, 0.85f);
         Gizmos.DrawWireCube(waterCollider.bounds.center, waterCollider.bounds.size);
     }
 }

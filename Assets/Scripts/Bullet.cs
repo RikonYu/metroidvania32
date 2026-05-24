@@ -7,6 +7,14 @@ public enum BulletSource
     Enemy
 }
 
+public enum BulletElement
+{
+    None,
+    Fire,
+    Ice,
+    Poison
+}
+
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Collider2D))]
 public class Bullet : MonoBehaviour
@@ -14,13 +22,18 @@ public class Bullet : MonoBehaviour
     [SerializeField] private BulletSource source = BulletSource.Player;
     [SerializeField] private Vector2 direction = Vector2.right;
     [SerializeField] private float speed = 16f;
+    [SerializeField] private float maxRange;
     [SerializeField] private int damage = 1;
     [SerializeField] private bool isHyperbolic;
     [SerializeField] private float hyperbolicGravityScale = 1f;
     [SerializeField] private bool isPiercing;
+    [SerializeField] private bool isCharged;
+    [SerializeField] private BulletElement elemental = BulletElement.None;
+    [SerializeField] private float explosionRadius = 2f;
 
     private Rigidbody2D body;
     private Vector2 worldVelocity;
+    private Vector2 rangeOrigin;
     private readonly List<WaterZone> waterZones = new List<WaterZone>();
     private WaterZone currentWaterZone;
 
@@ -31,12 +44,17 @@ public class Bullet : MonoBehaviour
 
     public Vector2 Direction
     {
-        get { return NormalizeDirection(direction); }
+        get { return Utils.NormalizeOrFallback(direction, Vector2.right); }
     }
 
     public float Speed
     {
         get { return speed; }
+    }
+
+    public float MaxRange
+    {
+        get { return maxRange; }
     }
 
     public int Damage
@@ -54,93 +72,146 @@ public class Bullet : MonoBehaviour
         get { return isPiercing; }
     }
 
-    private void Awake()
+    public bool IsCharged
+    {
+        get { return isCharged; }
+    }
+
+    public BulletElement Elemental
+    {
+        get { return elemental; }
+    }
+
+    public float ExplosionRadius
+    {
+        get { return explosionRadius; }
+    }
+
+    public Vector2 WorldVelocity
+    {
+        get { return worldVelocity; }
+    }
+
+    protected virtual void Awake()
     {
         CacheRigidbody();
         ConfigurePhysics();
         ApplyLayer();
+        ResetRangeOrigin();
         ResetVelocity();
         FaceVelocity();
     }
 
-    private void OnEnable()
+    protected virtual void OnEnable()
     {
         ConfigurePhysics();
         ApplyLayer();
+        ResetRangeOrigin();
         ResetVelocity();
         FaceVelocity();
     }
 
-    private void FixedUpdate()
+    protected virtual void FixedUpdate()
     {
+        if (DestroyIfPastMaxRange())
+        {
+            return;
+        }
+
         StepVelocity();
         FaceVelocity();
     }
 
-    private void OnDisable()
+    protected virtual void OnDisable()
     {
         waterZones.Clear();
         currentWaterZone = null;
     }
 
-    private void OnValidate()
+    protected virtual void OnValidate()
     {
-        direction = NormalizeDirection(direction);
+        direction = Utils.NormalizeOrFallback(direction, Vector2.right);
         speed = Mathf.Max(0f, speed);
+        maxRange = Mathf.Max(0f, maxRange);
         damage = Mathf.Max(1, damage);
         hyperbolicGravityScale = Mathf.Max(0f, hyperbolicGravityScale);
+        explosionRadius = Mathf.Max(0f, explosionRadius);
+        ApplyChargedElementRules();
         ConfigurePhysics();
         ApplyLayerAfterValidation();
     }
 
     public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed)
     {
-        Configure(bulletSource, bulletDirection, bulletSpeed, damage);
-    }
-
-    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, int bulletDamage)
-    {
-        Configure(bulletSource, bulletDirection, bulletSpeed, bulletDamage, isHyperbolic, isPiercing);
+        Configure(bulletSource, bulletDirection, bulletSpeed, isHyperbolic, isPiercing);
     }
 
     public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, bool bulletIsHyperbolic)
     {
-        Configure(bulletSource, bulletDirection, bulletSpeed, damage, bulletIsHyperbolic, isPiercing);
+        Configure(bulletSource, bulletDirection, bulletSpeed, bulletIsHyperbolic, isPiercing);
     }
 
-    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, int bulletDamage, bool bulletIsHyperbolic)
+    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, bool bulletIsHyperbolic, bool bulletIsPiercing)
     {
-        Configure(bulletSource, bulletDirection, bulletSpeed, bulletDamage, bulletIsHyperbolic, isPiercing);
+        Configure(bulletSource, bulletDirection, bulletSpeed, bulletIsHyperbolic, bulletIsPiercing, elemental, isCharged);
     }
 
-    public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, int bulletDamage, bool bulletIsHyperbolic, bool bulletIsPiercing)
+    public virtual void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed, bool bulletIsHyperbolic, bool bulletIsPiercing, BulletElement bulletElement, bool bulletIsCharged)
     {
         source = bulletSource;
-        direction = NormalizeDirection(bulletDirection);
+        direction = Utils.NormalizeOrFallback(bulletDirection, Vector2.right);
         speed = Mathf.Max(0f, bulletSpeed);
-        damage = Mathf.Max(1, bulletDamage);
         isHyperbolic = bulletIsHyperbolic;
         isPiercing = bulletIsPiercing;
+        elemental = bulletElement;
+        isCharged = bulletIsCharged;
+        ApplyChargedElementRules();
         ConfigurePhysics();
         ApplyLayer();
+        ResetRangeOrigin();
         ResetVelocity();
         FaceVelocity();
     }
 
+    protected void SetElemental(BulletElement bulletElement)
+    {
+        elemental = bulletElement;
+        ApplyChargedElementRules();
+    }
+
+    public void SetWorldVelocity(Vector2 velocity)
+    {
+        CacheRigidbody();
+        worldVelocity = velocity;
+        speed = velocity.magnitude;
+        if (velocity.sqrMagnitude > 0.0001f)
+        {
+            direction = velocity.normalized;
+        }
+
+        ApplyBodyVelocity();
+        FaceVelocity();
+    }
+
+    public void AddWorldVelocity(Vector2 velocity)
+    {
+        SetWorldVelocity(worldVelocity + velocity);
+    }
+
     private void OnTriggerEnter2D(Collider2D other)
     {
-        EnterWater(GetWaterZone(other));
+        EnterWater(Utils.GetWaterZone(other));
         HandleHit(other);
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
-        EnterWater(GetWaterZone(other));
+        EnterWater(Utils.GetWaterZone(other));
     }
 
     private void OnTriggerExit2D(Collider2D other)
     {
-        ExitWater(GetWaterZone(other));
+        ExitWater(Utils.GetWaterZone(other));
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
@@ -150,13 +221,36 @@ public class Bullet : MonoBehaviour
 
     private void HandleHit(Collider2D other)
     {
-        if (other == null || !ShouldDestroyOnLayer(other.gameObject.layer))
+        if (other == null)
+        {
+            return;
+        }
+
+        if (DestroyIfPastMaxRange())
+        {
+            return;
+        }
+
+        if (TryUnlockArrowLock(other))
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        if (!ShouldDestroyOnLayer(other.gameObject.layer))
         {
             return;
         }
 
         if (ShouldIgnoreDashingPlayer(other))
         {
+            return;
+        }
+
+        if (ShouldExplodeOnHit(other))
+        {
+            Explode(other);
+            Destroy(gameObject);
             return;
         }
 
@@ -189,6 +283,7 @@ public class Bullet : MonoBehaviour
 
     private void ConfigurePhysics()
     {
+        ApplyChargedElementRules();
         if (body == null)
         {
             return;
@@ -199,6 +294,14 @@ public class Bullet : MonoBehaviour
         ConfigureLayerCollisions();
     }
 
+    protected void ApplyChargedElementRules()
+    {
+        if (isCharged)
+        {
+            isPiercing = elemental != BulletElement.Fire;
+        }
+    }
+
     private void ResetVelocity()
     {
         CacheRigidbody();
@@ -207,8 +310,14 @@ public class Bullet : MonoBehaviour
             return;
         }
 
-        worldVelocity = NormalizeDirection(direction) * speed;
+        worldVelocity = Utils.NormalizeOrFallback(direction, Vector2.right) * speed;
         ApplyBodyVelocity();
+    }
+
+    private void ResetRangeOrigin()
+    {
+        CacheRigidbody();
+        rangeOrigin = body != null ? body.position : (Vector2)transform.position;
     }
 
     private void StepVelocity()
@@ -243,6 +352,23 @@ public class Bullet : MonoBehaviour
     private void ApplyBodyVelocity()
     {
         body.velocity = worldVelocity * GameTime.WorldScale;
+    }
+
+    private bool DestroyIfPastMaxRange()
+    {
+        if (maxRange <= 0f)
+        {
+            return false;
+        }
+
+        Vector2 currentPosition = body != null ? body.position : (Vector2)transform.position;
+        if ((currentPosition - rangeOrigin).sqrMagnitude <= maxRange * maxRange)
+        {
+            return false;
+        }
+
+        Destroy(gameObject);
+        return true;
     }
 
     private void RefreshWaterZone()
@@ -293,15 +419,15 @@ public class Bullet : MonoBehaviour
     {
         if (source == BulletSource.Player)
         {
-            return IsLayer(layer, GameLayers.Ground) || IsLayer(layer, GameLayers.Enemy);
+            return Utils.IsTerrainLayer(layer) || Utils.IsLayer(layer, GameLayers.Enemy);
         }
 
-        return IsLayer(layer, GameLayers.Ground) || IsLayer(layer, GameLayers.Player);
+        return Utils.IsTerrainLayer(layer) || Utils.IsLayer(layer, GameLayers.Player);
     }
 
     private bool ShouldPierceTarget(Collider2D other)
     {
-        return isPiercing && other != null && IsLayer(other.gameObject.layer, GameLayers.Enemy);
+        return isPiercing && IsEnemyTarget(other);
     }
 
     private void EnterWater(WaterZone waterZone)
@@ -330,11 +456,6 @@ public class Bullet : MonoBehaviour
         currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
     }
 
-    private static WaterZone GetWaterZone(Collider2D other)
-    {
-        return other != null ? other.GetComponentInParent<WaterZone>() : null;
-    }
-
     private bool ShouldIgnoreDashingPlayer(Collider2D other)
     {
         if (source != BulletSource.Enemy)
@@ -356,26 +477,200 @@ public class Bullet : MonoBehaviour
     {
         if (source == BulletSource.Player)
         {
-            EnemyController enemy = other.GetComponentInParent<EnemyController>();
+            EnemyController enemy = Utils.GetEnemyTarget(other);
             if (enemy != null)
             {
-                enemy.TakeDamage(damage);
+                ApplyHitEffect(enemy);
             }
 
             return;
         }
 
-        PlayerRespawn playerRespawn = other.GetComponentInParent<PlayerRespawn>();
+        PlayerRespawn playerRespawn = Utils.GetPlayerTarget(other);
         if (playerRespawn != null)
         {
-            playerRespawn.DieFromEnemy();
+            ApplyHitEffect(playerRespawn);
         }
+    }
+
+    private void ApplyHitEffect(EnemyController enemy)
+    {
+        ApplyHitEffect(enemy, true);
+    }
+
+    private void ApplyHitEffect(EnemyController enemy, bool applyElementalStatus)
+    {
+        if (enemy == null)
+        {
+            return;
+        }
+
+        enemy.TakeDamage(damage);
+        if (!applyElementalStatus)
+        {
+            return;
+        }
+
+        switch (elemental)
+        {
+            case BulletElement.Fire:
+                enemy.ApplyBurning(damage);
+                break;
+            case BulletElement.Ice:
+                enemy.ApplyFrozenOrSlowed();
+                break;
+            case BulletElement.Poison:
+                enemy.ApplyPoisoned();
+                break;
+        }
+    }
+
+    private void ApplyHitEffect(PlayerRespawn playerRespawn)
+    {
+        ApplyHitEffect(playerRespawn, true);
+    }
+
+    private void ApplyHitEffect(PlayerRespawn playerRespawn, bool applyElementalStatus)
+    {
+        if (playerRespawn == null)
+        {
+            return;
+        }
+
+        if (!playerRespawn.TakeDamageFromEnemy(damage))
+        {
+            return;
+        }
+
+        if (applyElementalStatus)
+        {
+            switch (elemental)
+            {
+                case BulletElement.Fire:
+                    playerRespawn.ApplyBurning(damage);
+                    break;
+                case BulletElement.Ice:
+                    playerRespawn.ApplyFrozen();
+                    break;
+                case BulletElement.Poison:
+                    playerRespawn.ApplyPoisoned();
+                    break;
+            }
+        }
+    }
+
+    private bool ShouldExplodeOnHit(Collider2D other)
+    {
+        return isCharged && elemental == BulletElement.Fire && other != null && (IsEnemyTarget(other) || Utils.IsTerrain(other));
+    }
+
+    protected virtual void Explode(Collider2D firstHit)
+    {
+        Vector2 center = GetExplosionCenter(firstHit);
+        ApplyExplosionToFireLocks(center);
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(center, explosionRadius, GetEnemyTargetMask());
+        if (source == BulletSource.Player)
+        {
+            ApplyExplosionToEnemies(hits);
+            return;
+        }
+
+        ApplyExplosionToPlayers(hits);
+    }
+
+    private bool TryUnlockArrowLock(Collider2D other)
+    {
+        ArrowLock arrowLock = other != null ? other.GetComponentInParent<ArrowLock>() : null;
+        if (arrowLock == null)
+        {
+            return false;
+        }
+
+        arrowLock.UnlockFromArrow(this);
+        return arrowLock.IsUnlocked;
+    }
+
+    private void ApplyExplosionToFireLocks(Vector2 center)
+    {
+        if (source != BulletSource.Player || !isCharged || elemental != BulletElement.Fire)
+        {
+            return;
+        }
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(center, explosionRadius);
+        HashSet<FireLock> affectedLocks = new HashSet<FireLock>();
+        for (int i = 0; i < hits.Length; i++)
+        {
+            FireLock fireLock = hits[i] != null ? hits[i].GetComponentInParent<FireLock>() : null;
+            if (fireLock != null && affectedLocks.Add(fireLock))
+            {
+                fireLock.UnlockFromChargedFireExplosion(this);
+            }
+        }
+    }
+
+    private void ApplyExplosionToEnemies(Collider2D[] hits)
+    {
+        HashSet<EnemyController> affectedEnemies = new HashSet<EnemyController>();
+        for (int i = 0; i < hits.Length; i++)
+        {
+            EnemyController enemy = Utils.GetEnemyTarget(hits[i]);
+            if (enemy != null && affectedEnemies.Add(enemy))
+            {
+                ApplyHitEffect(enemy, false);
+            }
+        }
+    }
+
+    private void ApplyExplosionToPlayers(Collider2D[] hits)
+    {
+        HashSet<PlayerRespawn> affectedPlayers = new HashSet<PlayerRespawn>();
+        for (int i = 0; i < hits.Length; i++)
+        {
+            PlayerRespawn playerRespawn = Utils.GetPlayerTarget(hits[i]);
+            if (playerRespawn != null && affectedPlayers.Add(playerRespawn))
+            {
+                ApplyHitEffect(playerRespawn, false);
+            }
+        }
+    }
+
+    protected Vector2 GetExplosionCenter(Collider2D firstHit)
+    {
+        Vector2 fallback = body != null ? body.position : (Vector2)transform.position;
+        if (firstHit == null)
+        {
+            return fallback;
+        }
+
+        return firstHit.ClosestPoint(fallback);
+    }
+
+    private int GetEnemyTargetMask()
+    {
+        return source == BulletSource.Player ? LayerMask.GetMask(GameLayers.Enemy) : LayerMask.GetMask(GameLayers.Player);
+    }
+
+    private bool IsEnemyTarget(Collider2D other)
+    {
+        if (other == null)
+        {
+            return false;
+        }
+
+        if (source == BulletSource.Player)
+        {
+            return Utils.IsLayer(other.gameObject.layer, GameLayers.Enemy) || Utils.GetEnemyTarget(other) != null;
+        }
+
+        return Utils.IsLayer(other.gameObject.layer, GameLayers.Player) || Utils.GetPlayerTarget(other) != null;
     }
 
     private static void ConfigureLayerCollisions()
     {
-        ConfigureBulletLayer(GameLayers.PlayerBullet, GameLayers.Ground, GameLayers.Enemy, GameLayers.Water);
-        ConfigureBulletLayer(GameLayers.EnemyBullet, GameLayers.Ground, GameLayers.Player, GameLayers.Water);
+        ConfigureBulletLayer(GameLayers.PlayerBullet, GameLayers.Ground, GameLayers.Obstacle, GameLayers.Platform, GameLayers.Trigger, GameLayers.Enemy, GameLayers.Water);
+        ConfigureBulletLayer(GameLayers.EnemyBullet, GameLayers.Ground, GameLayers.Obstacle, GameLayers.Platform, GameLayers.Player, GameLayers.Water);
     }
 
     private static void ConfigureBulletLayer(string bulletLayerName, params string[] targetLayerNames)
@@ -404,21 +699,6 @@ public class Bullet : MonoBehaviour
         {
             Physics2D.IgnoreLayerCollision(bulletLayer, targetLayer, false);
         }
-    }
-
-    private static bool IsLayer(int layer, string layerName)
-    {
-        return layer == LayerMask.NameToLayer(layerName);
-    }
-
-    private static Vector2 NormalizeDirection(Vector2 rawDirection)
-    {
-        if (rawDirection.sqrMagnitude <= 0.0001f)
-        {
-            return Vector2.right;
-        }
-
-        return rawDirection.normalized;
     }
 
     private static string GetBulletLayerName(BulletSource bulletSource)

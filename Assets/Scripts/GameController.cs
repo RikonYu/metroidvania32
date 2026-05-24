@@ -1,28 +1,78 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class GameController : MonoBehaviour
 {
     public static GameController instance;
 
+    [Header("Health Bottles")]
+    [SerializeField] private int maxHealthBottles = Consts.DefaultMaxHealthBottles;
+    [SerializeField] private int currentHealthBottles = Consts.DefaultCurrentHealthBottles;
+
+    [Header("Abilities")]
+    [SerializeField] private bool canDoubleJump;
+
+    public static GameController Instance
+    {
+        get { return instance; }
+    }
+
+    public int MaxHealthBottles
+    {
+        get { return maxHealthBottles; }
+    }
+
+    public int CurrentHealthBottles
+    {
+        get { return currentHealthBottles; }
+    }
+
+    public bool CanDoubleJump
+    {
+        get { return canDoubleJump; }
+    }
+
     private void Awake()
     {
         instance = this;
+        ClampHealthBottles();
     }
 
-    // Start is called before the first frame update
-    void Start()
+    private void OnValidate()
     {
-        
+        ClampHealthBottles();
     }
 
-
-
-    // Update is called once per frame
-    void Update()
+    public bool TryUseHealthBottle()
     {
-        
+        if (currentHealthBottles <= 0)
+        {
+            return false;
+        }
+
+        currentHealthBottles--;
+        return true;
+    }
+
+    public void RestoreHealthBottlesToFull()
+    {
+        currentHealthBottles = maxHealthBottles;
+    }
+
+    public void IncreaseHealthBottleCapacity(int amount)
+    {
+        if (amount <= 0)
+        {
+            return;
+        }
+
+        maxHealthBottles += amount;
+        currentHealthBottles = Mathf.Min(maxHealthBottles, currentHealthBottles + amount);
+    }
+
+    private void ClampHealthBottles()
+    {
+        maxHealthBottles = Mathf.Max(0, maxHealthBottles);
+        currentHealthBottles = Mathf.Clamp(currentHealthBottles, 0, maxHealthBottles);
     }
 }
 
@@ -59,7 +109,7 @@ public static class GameTime
         }
 
         slowOwner = owner;
-        worldScale = Mathf.Clamp(scale, 0.01f, 1f);
+        worldScale = Mathf.Clamp(scale, Consts.MinWorldScale, 1f);
         slowUntil = Time.time + duration;
     }
 
