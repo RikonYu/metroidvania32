@@ -327,7 +327,7 @@ public class PlayerRespawn : MonoBehaviour
 
     private void OnTriggerStay2D(Collider2D other)
     {
-        if (Utils.IsPoisonousWater(other))
+        if (Utils.IsPoisonousWater(other, transform.position))
         {
             DieFromHazard();
         }
@@ -345,7 +345,7 @@ public class PlayerRespawn : MonoBehaviour
             return;
         }
 
-        if (Utils.IsLayerInMask(other.gameObject.layer, hazardMask) || Utils.IsPoisonousWater(other))
+        if (Utils.IsLayerInMask(other.gameObject.layer, hazardMask) || Utils.IsPoisonousWater(other, transform.position))
         {
             DieFromHazard();
             return;

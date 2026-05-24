@@ -182,7 +182,7 @@ MonoBehaviour:
   movementKind: 1
   isBoss: 0
   isUnderwaterEnemy: 0
-  maxHp: 3
+  maxHp: -1
   moveSpeed: 3
   groundContactMinNormalY: 0.2
   movementGroundMask:
@@ -192,7 +192,7 @@ MonoBehaviour:
   bulletPrefab: {fileID: 5508051685205980212, guid: 45a04f79ac6a97d4888987402df1d383, type: 3}
   bulletSpawnPoint: {fileID: 2600050193604319903}
   attackCooldown: 1
-  contactDamage: 1
+  contactDamage: 0
   normalEnemyKnockbackDistance: 3
   knockbackDuration: 0.15
   isBurning: 0

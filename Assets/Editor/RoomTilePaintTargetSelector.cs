@@ -1,7 +1,6 @@
 using UnityEditor;
 using UnityEditor.Tilemaps;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.Tilemaps;
 
 [InitializeOnLoad]
@@ -33,6 +32,7 @@ public static class RoomTilePaintTargetSelector
         Room room = FindRoomAtMouse(current.mousePosition);
         if (room == null)
         {
+            ClearPaintTarget();
             return;
         }
 
@@ -54,6 +54,7 @@ public static class RoomTilePaintTargetSelector
         return current.type == EventType.MouseMove
             || current.type == EventType.MouseDown
             || current.type == EventType.MouseDrag
+            || current.type == EventType.MouseUp
             || current.type == EventType.Repaint;
     }
 
@@ -61,5 +62,13 @@ public static class RoomTilePaintTargetSelector
     {
         Vector3 worldPosition = Utils.GetMouseWorldPosition(mousePosition);
         return Utils.FindContainingRoom(worldPosition, false);
+    }
+
+    private static void ClearPaintTarget()
+    {
+        if (GridPaintingState.scenePaintTarget != null)
+        {
+            GridPaintingState.scenePaintTarget = null;
+        }
     }
 }

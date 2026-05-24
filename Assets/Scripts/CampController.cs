@@ -74,6 +74,7 @@ public class CampController : MonoBehaviour
         if (reviveEnemiesOnSave)
         {
             EnemyController.RespawnNonBossEnemies();
+            EnemySpawner.ResetUnfinishedSpawnersForCampRespawn();
         }
     }
 

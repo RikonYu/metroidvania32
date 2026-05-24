@@ -223,6 +223,7 @@ public class MCController : MonoBehaviour
 
     private void Update()
     {
+        RefreshWaterZone();
         UpdateElementalStatuses(Time.deltaTime);
         UpdateStamina();
 
@@ -286,6 +287,7 @@ public class MCController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        RefreshWaterZone();
         bool wasGroundedOnSlope = IsGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal);
         UpdateOneWayPlatformDrop();
         UpdateGroundedState();
@@ -1577,11 +1579,7 @@ public class MCController : MonoBehaviour
             waterZones.Add(waterZone);
         }
 
-        currentWaterZone = waterZone;
-        body.gravityScale = 0f;
-        jumpBufferCounter = 0f;
-        coyoteCounter = 0f;
-        SetEdgeSlipLock(false);
+        RefreshWaterZone();
     }
 
     private void ClearWaterState()
@@ -1602,19 +1600,50 @@ public class MCController : MonoBehaviour
             return;
         }
 
-        bool wasCurrent = currentWaterZone == waterZone;
         waterZones.Remove(waterZone);
-        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+        RefreshWaterZone(waterZone);
+    }
+
+    private void RefreshWaterZone(WaterZone exitedWaterZone = null)
+    {
+        WaterZone previousWaterZone = currentWaterZone;
+        PruneTrackedWaterZones();
+
+        Vector2 position = body != null ? body.position : (Vector2)transform.position;
+        currentWaterZone = WaterZone.GetZoneAtPoint(position);
+        if (currentWaterZone != null && !waterZones.Contains(currentWaterZone))
+        {
+            waterZones.Add(currentWaterZone);
+        }
 
         if (currentWaterZone != null)
         {
+            body.gravityScale = 0f;
+            jumpBufferCounter = 0f;
+            coyoteCounter = 0f;
+            SetEdgeSlipLock(false);
             return;
         }
 
-        RestoreGravity();
-        if (wasCurrent && (inputY > 0.01f || body.velocity.y > 0.01f))
+        if (previousWaterZone != null)
         {
-            body.velocity = new Vector2(body.velocity.x, Mathf.Max(body.velocity.y, waterZone.WaterExitBoost * GameTime.WorldScale));
+            RestoreGravity();
+            WaterZone boostWaterZone = exitedWaterZone != null ? exitedWaterZone : previousWaterZone;
+            if (inputY > 0.01f || body.velocity.y > 0.01f)
+            {
+                body.velocity = new Vector2(body.velocity.x, Mathf.Max(body.velocity.y, boostWaterZone.WaterExitBoost * GameTime.WorldScale));
+            }
+        }
+    }
+
+    private void PruneTrackedWaterZones()
+    {
+        for (int i = waterZones.Count - 1; i >= 0; i--)
+        {
+            if (waterZones[i] == null || !waterZones[i].isActiveAndEnabled)
+            {
+                waterZones.RemoveAt(i);
+            }
         }
     }
 

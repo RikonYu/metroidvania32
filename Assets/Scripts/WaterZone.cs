@@ -33,11 +33,17 @@ public class WaterZone : MonoBehaviour
     public float BulletDrag { get { return bulletDrag; } }
     public bool KillNonUnderwaterEnemies { get { return killNonUnderwaterEnemies; } }
     public bool IsPoisonous { get { return isPoisonous; } }
+    public Color GizmoColor { get { return isPoisonous ? poisonousGizmoColor : gizmoColor; } }
 
     private Collider2D waterCollider;
 
     public static WaterZone GetZoneAtPoint(Vector2 worldPoint)
     {
+        if (AirZone.HasAirAtPoint(worldPoint))
+        {
+            return null;
+        }
+
         for (int i = ActiveZones.Count - 1; i >= 0; i--)
         {
             WaterZone waterZone = ActiveZones[i];
@@ -133,19 +139,16 @@ public class WaterZone : MonoBehaviour
         return waterCollider != null && waterCollider.OverlapPoint(worldPoint);
     }
 
-    private void OnDrawGizmos()
+    public bool TryGetGizmoBounds(out Bounds bounds)
     {
         CacheCollider();
         if (waterCollider == null)
         {
-            return;
+            bounds = default;
+            return false;
         }
 
-        Color activeGizmoColor = isPoisonous ? poisonousGizmoColor : gizmoColor;
-
-        Gizmos.color = activeGizmoColor;
-        Gizmos.DrawCube(waterCollider.bounds.center, waterCollider.bounds.size);
-        Gizmos.color = new Color(activeGizmoColor.r, activeGizmoColor.g, activeGizmoColor.b, 0.85f);
-        Gizmos.DrawWireCube(waterCollider.bounds.center, waterCollider.bounds.size);
+        bounds = waterCollider.bounds;
+        return true;
     }
 }

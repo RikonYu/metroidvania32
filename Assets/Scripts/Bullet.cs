@@ -381,7 +381,12 @@ public class Bullet : MonoBehaviour
         WaterZone positionWaterZone = WaterZone.GetZoneAtPoint(position);
         if (positionWaterZone != null)
         {
-            EnterWater(positionWaterZone);
+            if (!waterZones.Contains(positionWaterZone))
+            {
+                waterZones.Add(positionWaterZone);
+            }
+
+            currentWaterZone = positionWaterZone;
             return;
         }
 
@@ -393,7 +398,7 @@ public class Bullet : MonoBehaviour
             }
         }
 
-        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+        currentWaterZone = null;
     }
 
     private void FaceVelocity()
@@ -446,7 +451,7 @@ public class Bullet : MonoBehaviour
             waterZones.Add(waterZone);
         }
 
-        currentWaterZone = waterZone;
+        RefreshWaterZone();
     }
 
     private void ExitWater(WaterZone waterZone)
@@ -457,7 +462,7 @@ public class Bullet : MonoBehaviour
         }
 
         waterZones.Remove(waterZone);
-        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+        RefreshWaterZone();
     }
 
     private bool ShouldIgnoreDashingPlayer(Collider2D other)

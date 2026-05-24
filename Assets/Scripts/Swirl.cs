@@ -10,6 +10,8 @@ public class Swirl : MonoBehaviour
     [SerializeField] private float downtime;
 
     private readonly List<MCController> activePlayers = new List<MCController>();
+    private SpriteRenderer[] spriteRenderers;
+    private bool[] initialSpriteEnabledStates;
     private float cycleTimer;
     private bool isActive = true;
 
@@ -35,14 +37,17 @@ public class Swirl : MonoBehaviour
 
     private void OnEnable()
     {
+        CacheSpriteRenderers();
         isActive = true;
         cycleTimer = 0f;
+        SetSpriteVisible(true);
     }
 
     private void OnDisable()
     {
         DeactivateForPlayers();
         activePlayers.Clear();
+        SetSpriteVisible(true);
     }
 
     private void OnValidate()
@@ -60,6 +65,7 @@ public class Swirl : MonoBehaviour
             if (!isActive)
             {
                 isActive = true;
+                SetSpriteVisible(true);
             }
 
             cycleTimer = 0f;
@@ -72,6 +78,7 @@ public class Swirl : MonoBehaviour
             isActive = false;
             cycleTimer = 0f;
             DeactivateForPlayers();
+            SetSpriteVisible(false);
             return;
         }
 
@@ -79,6 +86,7 @@ public class Swirl : MonoBehaviour
         {
             isActive = true;
             cycleTimer = 0f;
+            SetSpriteVisible(true);
         }
     }
 
@@ -174,6 +182,33 @@ public class Swirl : MonoBehaviour
             if (player != null)
             {
                 player.ExitSwirl(this);
+            }
+        }
+    }
+
+    private void CacheSpriteRenderers()
+    {
+        spriteRenderers = GetComponentsInChildren<SpriteRenderer>(true);
+        initialSpriteEnabledStates = new bool[spriteRenderers.Length];
+        for (int i = 0; i < spriteRenderers.Length; i++)
+        {
+            initialSpriteEnabledStates[i] = spriteRenderers[i] != null && spriteRenderers[i].enabled;
+        }
+    }
+
+    private void SetSpriteVisible(bool visible)
+    {
+        if (spriteRenderers == null || initialSpriteEnabledStates == null)
+        {
+            CacheSpriteRenderers();
+        }
+
+        for (int i = 0; i < spriteRenderers.Length; i++)
+        {
+            SpriteRenderer spriteRenderer = spriteRenderers[i];
+            if (spriteRenderer != null)
+            {
+                spriteRenderer.enabled = visible && initialSpriteEnabledStates[i];
             }
         }
     }

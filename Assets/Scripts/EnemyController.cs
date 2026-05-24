@@ -91,6 +91,11 @@ public class EnemyController : MonoBehaviour
         get { return !dead; }
     }
 
+    public bool IsInvincible
+    {
+        get { return maxHp == -1; }
+    }
+
     public bool CanAttack
     {
         get { return IsAlive && !isFrozen && attackCooldownRemaining <= 0f; }
@@ -159,6 +164,7 @@ public class EnemyController : MonoBehaviour
         bool wasGroundedOnSlope = isGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal);
         UpdateGroundSupport();
         PreventSlopeExitLaunch(wasGroundedOnSlope);
+        RefreshWaterZone();
         ApplyMovementKindPhysics();
         if (isFrozen)
         {
@@ -170,7 +176,15 @@ public class EnemyController : MonoBehaviour
 
     private void OnValidate()
     {
-        maxHp = Mathf.Max(1, maxHp);
+        if (maxHp < -1)
+        {
+            maxHp = -1;
+        }
+        else if (maxHp == 0)
+        {
+            maxHp = 1;
+        }
+
         moveSpeed = Mathf.Max(0f, moveSpeed);
         groundContactMinNormalY = Mathf.Clamp01(groundContactMinNormalY);
         attackCooldown = Mathf.Max(0f, attackCooldown);
@@ -268,7 +282,7 @@ public class EnemyController : MonoBehaviour
 
     public void TakeDamage(int damage)
     {
-        if (!IsAlive || damage <= 0)
+        if (!IsAlive || IsInvincible || damage <= 0)
         {
             return;
         }
@@ -282,7 +296,7 @@ public class EnemyController : MonoBehaviour
 
     public void Heal(int amount)
     {
-        if (!IsAlive || amount <= 0)
+        if (!IsAlive || IsInvincible || amount <= 0)
         {
             return;
         }
@@ -300,7 +314,7 @@ public class EnemyController : MonoBehaviour
 
     public void ApplyBurning(int sourceDamage)
     {
-        if (!IsAlive || sourceDamage <= 0)
+        if (!IsAlive || IsInvincible || sourceDamage <= 0)
         {
             return;
         }
@@ -312,7 +326,7 @@ public class EnemyController : MonoBehaviour
 
     public void ApplyFrozenOrSlowed()
     {
-        if (!IsAlive)
+        if (!IsAlive || IsInvincible)
         {
             return;
         }
@@ -333,7 +347,7 @@ public class EnemyController : MonoBehaviour
 
     public void ApplyPoisoned()
     {
-        if (IsAlive)
+        if (IsAlive && !IsInvincible)
         {
             isPoisoned = true;
         }
@@ -578,6 +592,16 @@ public class EnemyController : MonoBehaviour
 
     private void UpdateElementalStatuses(float deltaTime)
     {
+        if (IsInvincible)
+        {
+            if (isBurning || isFrozen || isPoisoned || isIceSlowed)
+            {
+                ClearElementalStatuses();
+            }
+
+            return;
+        }
+
         if (deltaTime <= 0f)
         {
             return;
@@ -726,7 +750,7 @@ public class EnemyController : MonoBehaviour
             return;
         }
 
-        WaterZone waterZone = Utils.GetWaterZone(other);
+        WaterZone waterZone = GetWaterZoneAtPosition();
         if (waterZone != null && waterZone.KillNonUnderwaterEnemies)
         {
             Die();
@@ -745,7 +769,7 @@ public class EnemyController : MonoBehaviour
             waterZones.Add(waterZone);
         }
 
-        currentWaterZone = waterZone;
+        RefreshWaterZone();
     }
 
     private void ExitWater(WaterZone waterZone)
@@ -756,7 +780,34 @@ public class EnemyController : MonoBehaviour
         }
 
         waterZones.Remove(waterZone);
-        currentWaterZone = waterZones.Count > 0 ? waterZones[waterZones.Count - 1] : null;
+        RefreshWaterZone();
+    }
+
+    private void RefreshWaterZone()
+    {
+        PruneTrackedWaterZones();
+        currentWaterZone = GetWaterZoneAtPosition();
+        if (currentWaterZone != null && !waterZones.Contains(currentWaterZone))
+        {
+            waterZones.Add(currentWaterZone);
+        }
+    }
+
+    private WaterZone GetWaterZoneAtPosition()
+    {
+        Vector2 position = body != null ? body.position : (Vector2)transform.position;
+        return WaterZone.GetZoneAtPoint(position);
+    }
+
+    private void PruneTrackedWaterZones()
+    {
+        for (int i = waterZones.Count - 1; i >= 0; i--)
+        {
+            if (waterZones[i] == null || !waterZones[i].isActiveAndEnabled)
+            {
+                waterZones.RemoveAt(i);
+            }
+        }
     }
 
     private void OnTriggerEnter2D(Collider2D other)

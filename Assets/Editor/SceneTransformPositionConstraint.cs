@@ -144,16 +144,33 @@ public static class SceneTransformPositionConstraint
         List<Transform> targets = new List<Transform>();
         foreach (Transform transform in transforms)
         {
-            if (transform == null || !seen.Add(transform) || ShouldSkip(transform))
+            Transform target = GetConstrainedTarget(transform);
+            if (target == null || !seen.Add(target) || ShouldSkip(target))
             {
                 continue;
             }
 
-            targets.Add(transform);
+            targets.Add(target);
         }
 
         targets.Sort((a, b) => GetDepth(a).CompareTo(GetDepth(b)));
         return targets;
+    }
+
+    private static Transform GetConstrainedTarget(Transform source)
+    {
+        if (source == null)
+        {
+            return null;
+        }
+
+        GameObject prefabRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(source.gameObject);
+        if (prefabRoot != null && prefabRoot.transform != source)
+        {
+            return null;
+        }
+
+        return source;
     }
 
     private static void SnapTransform(Transform target, string undoName, HashSet<Scene> dirtyScenes)

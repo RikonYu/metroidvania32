@@ -91,6 +91,17 @@ public static class Utils
         return waterZone != null && waterZone.IsPoisonous;
     }
 
+    public static bool IsPoisonousWater(Collider2D other, Vector2 worldPoint)
+    {
+        if (GetWaterZone(other) == null)
+        {
+            return false;
+        }
+
+        WaterZone waterZone = WaterZone.GetZoneAtPoint(worldPoint);
+        return waterZone != null && waterZone.IsPoisonous;
+    }
+
     public static bool IsSceneInstance(GameObject gameObject)
     {
         return gameObject != null && gameObject.scene.IsValid();
@@ -148,14 +159,15 @@ public static class Utils
         snappedPosition = target != null ? target.position : Vector3.zero;
 
         int groundLayer = LayerMask.NameToLayer(GameLayers.Ground);
-        if (target == null || targetCollider == null || groundLayer < 0 || !IsSceneTransform(target))
+        Room targetRoom = target != null ? target.GetComponentInParent<Room>(true) : null;
+        if (target == null || targetCollider == null || targetRoom == null || groundLayer < 0 || !IsSceneTransform(target))
         {
             return false;
         }
 
         Bounds targetBounds = targetCollider.bounds;
-        if (TryFindGroundYByRaycast(target, targetBounds, groundLayer, out float groundY)
-            || TryFindGroundYByBounds(target, targetBounds, groundLayer, out groundY))
+        if (TryFindGroundYByRaycast(target, targetBounds, groundLayer, targetRoom, out float groundY)
+            || TryFindGroundYByBounds(target, targetBounds, groundLayer, targetRoom, out groundY))
         {
             snappedPosition.y += groundY - targetBounds.min.y;
             return true;
@@ -235,7 +247,7 @@ public static class Utils
         return prefabStage != null && prefabStage.scene == scene;
     }
 
-    private static bool TryFindGroundYByRaycast(Transform target, Bounds targetBounds, int groundLayer, out float groundY)
+    private static bool TryFindGroundYByRaycast(Transform target, Bounds targetBounds, int groundLayer, Room targetRoom, out float groundY)
     {
         groundY = 0f;
 
@@ -252,7 +264,7 @@ public static class Utils
             if (hit.collider == null
                 || hit.normal.y <= 0f
                 || hit.point.y > targetBounds.max.y + GroundSnapEpsilon
-                || !IsSceneGround(hit.collider, target.gameObject.scene, groundLayer)
+                || !IsSceneGround(hit.collider, target.gameObject.scene, groundLayer, targetRoom)
                 || hit.collider.transform.IsChildOf(target))
             {
                 continue;
@@ -269,7 +281,7 @@ public static class Utils
         return found;
     }
 
-    private static bool TryFindGroundYByBounds(Transform target, Bounds targetBounds, int groundLayer, out float groundY)
+    private static bool TryFindGroundYByBounds(Transform target, Bounds targetBounds, int groundLayer, Room targetRoom, out float groundY)
     {
         groundY = 0f;
 
@@ -280,7 +292,7 @@ public static class Utils
         for (int i = 0; i < colliders.Length; i++)
         {
             Collider2D ground = colliders[i];
-            if (!IsSceneGround(ground, target.gameObject.scene, groundLayer)
+            if (!IsSceneGround(ground, target.gameObject.scene, groundLayer, targetRoom)
                 || ground.transform.IsChildOf(target))
             {
                 continue;
@@ -313,14 +325,15 @@ public static class Utils
             && IsSceneTransform(component.transform);
     }
 
-    private static bool IsSceneGround(Collider2D collider2D, Scene scene, int groundLayer)
+    private static bool IsSceneGround(Collider2D collider2D, Scene scene, int groundLayer, Room targetRoom)
     {
         return collider2D != null
             && collider2D.gameObject.layer == groundLayer
             && !EditorUtility.IsPersistent(collider2D)
             && collider2D.gameObject.scene == scene
             && collider2D.gameObject.scene.IsValid()
-            && !IsPrefabStageScene(collider2D.gameObject.scene);
+            && !IsPrefabStageScene(collider2D.gameObject.scene)
+            && collider2D.GetComponentInParent<Room>(true) == targetRoom;
     }
 #endif
 }
