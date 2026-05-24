@@ -141,6 +141,11 @@ public class Bullet : MonoBehaviour
         ApplyLayerAfterValidation();
     }
 
+    public void Configure(BulletSource bulletSource, Vector2 bulletDirection)
+    {
+        Configure(bulletSource, bulletDirection, speed, isHyperbolic, isPiercing);
+    }
+
     public void Configure(BulletSource bulletSource, Vector2 bulletDirection, float bulletSpeed)
     {
         Configure(bulletSource, bulletDirection, bulletSpeed, isHyperbolic, isPiercing);

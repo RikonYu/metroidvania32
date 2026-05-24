@@ -5,8 +5,8 @@ public class StaticEnemyAI : EnemyAI
 {
     [Header("Static Fire")]
     [SerializeField] private int fireDirection = GameDirection.Left;
+    [SerializeField] private float firstHitDelay;
     [SerializeField] private float fireInterval = 1f;
-    [SerializeField] private bool fireImmediatelyOnEnable = true;
 
     private float fireTimer;
 
@@ -20,11 +20,16 @@ public class StaticEnemyAI : EnemyAI
         get { return fireInterval; }
     }
 
+    public float FirstHitDelay
+    {
+        get { return firstHitDelay; }
+    }
+
     protected override void OnEnable()
     {
         base.OnEnable();
         NormalizeStaticValues();
-        fireTimer = fireImmediatelyOnEnable ? 0f : fireInterval;
+        fireTimer = firstHitDelay;
         StopEnemy();
     }
 
@@ -91,6 +96,7 @@ public class StaticEnemyAI : EnemyAI
     private void NormalizeStaticValues()
     {
         fireDirection = GameDirection.NormalizeOrDefault(fireDirection, GameDirection.Left);
+        firstHitDelay = Mathf.Max(0f, firstHitDelay);
         fireInterval = Mathf.Max(0.01f, fireInterval);
     }
 }

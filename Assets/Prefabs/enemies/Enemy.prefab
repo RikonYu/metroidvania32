@@ -191,8 +191,6 @@ MonoBehaviour:
   patrolPoints: []
   bulletPrefab: {fileID: 0}
   bulletSpawnPoint: {fileID: 0}
-  attackDirection: {x: -1, y: 0}
-  bulletSpeed: 10
   attackCooldown: 1
   contactDamage: 1
   normalEnemyKnockbackDistance: 3

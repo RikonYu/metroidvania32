@@ -28,8 +28,6 @@ public class EnemyController : MonoBehaviour
     [Header("Attack")]
     [SerializeField] private Bullet bulletPrefab;
     [SerializeField] private Transform bulletSpawnPoint;
-    [SerializeField] private Vector2 attackDirection = Vector2.left;
-    [SerializeField] private float bulletSpeed = 10f;
     [SerializeField] private float attackCooldown = 1f;
 
     [Header("Melee Contact")]
@@ -175,12 +173,10 @@ public class EnemyController : MonoBehaviour
         maxHp = Mathf.Max(1, maxHp);
         moveSpeed = Mathf.Max(0f, moveSpeed);
         groundContactMinNormalY = Mathf.Clamp01(groundContactMinNormalY);
-        bulletSpeed = Mathf.Max(0f, bulletSpeed);
         attackCooldown = Mathf.Max(0f, attackCooldown);
         contactDamage = Mathf.Max(0, contactDamage);
         normalEnemyKnockbackDistance = Mathf.Max(0f, normalEnemyKnockbackDistance);
         knockbackDuration = Mathf.Max(0.01f, knockbackDuration);
-        attackDirection = Utils.NormalizeOrFallback(attackDirection, Vector2.left);
         EnsureMovementLayerMask();
         UpdateMovementContactFilter();
         ApplyLayerAfterValidation();
@@ -242,11 +238,6 @@ public class EnemyController : MonoBehaviour
         body.velocity = new Vector2(0f, body.velocity.y);
     }
 
-    public bool TryAttack()
-    {
-        return TryAttack(attackDirection);
-    }
-
     public bool TryAttack(Vector2 direction)
     {
         if (!CanAttack)
@@ -271,7 +262,7 @@ public class EnemyController : MonoBehaviour
         }
 
         Bullet bullet = SpawnBullet();
-        bullet.Configure(BulletSource.Enemy, Utils.NormalizeOrFallback(direction, Vector2.left), bulletSpeed);
+        bullet.Configure(BulletSource.Enemy, Utils.NormalizeOrFallback(direction, Vector2.left));
         return true;
     }
 
@@ -422,7 +413,7 @@ public class EnemyController : MonoBehaviour
         for (int i = 0; i < enemies.Length; i++)
         {
             EnemyController enemy = enemies[i];
-            if (enemy == null || enemy.isBoss || !Utils.IsSceneInstance(enemy.gameObject))
+            if (enemy == null || enemy.isBoss || !Utils.IsSceneInstance(enemy.gameObject) || EnemySpawner.IsManagedEnemy(enemy))
             {
                 continue;
             }

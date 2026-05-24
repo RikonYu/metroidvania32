@@ -150,6 +150,7 @@ public class MCController : MonoBehaviour
         ResetStamina();
         EnsureLayerMasks();
         UpdateMovementContactFilter();
+        GameLayers.EnsurePlayerTerrainCollisions();
     }
 
     private void Reset()
@@ -1213,6 +1214,7 @@ public class MCController : MonoBehaviour
         groundIgnoreCounter = 0f;
 
         GroundSupport support;
+        bool hasFrontGroundSupport = false;
         if (SlopeMovement.TryFindSupport(
             body,
             movementContactFilter,
@@ -1224,6 +1226,7 @@ public class MCController : MonoBehaviour
         {
             currentGround = support.Collider;
             currentGroundNormal = support.Normal;
+            hasFrontGroundSupport = true;
         }
         else
         {
@@ -1233,7 +1236,7 @@ public class MCController : MonoBehaviour
         }
 
         IsGrounded = currentGround != null;
-        IsOnSafeGround = IsGrounded && Utils.IsColliderOnMask(currentGround, safeGroundMask);
+        IsOnSafeGround = hasFrontGroundSupport && Utils.IsColliderOnMask(currentGround, safeGroundMask);
         if (IsGrounded && !IsUnderwater)
         {
             hasUsedDoubleJump = false;
@@ -1554,7 +1557,7 @@ public static class SlopeMovement
         }
 
         normal.Normalize();
-        return normal.y < 0f ? -normal : normal;
+        return normal;
     }
 
     private static Collider2D GetGroundColliderFromContact(ContactPoint2D contact, LayerMask groundMask)

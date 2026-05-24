@@ -246,6 +246,7 @@ public class PlayerRespawn : MonoBehaviour
         if (reviveEnemies)
         {
             EnemyController.RespawnNonBossEnemies();
+            EnemySpawner.ResetUnfinishedSpawnersForCampRespawn();
         }
 
         if (cameraRig != null)
