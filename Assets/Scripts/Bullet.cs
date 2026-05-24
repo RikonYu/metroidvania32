@@ -296,7 +296,6 @@ public class Bullet : MonoBehaviour
 
         body.gravityScale = 0f;
         body.freezeRotation = true;
-        ConfigureLayerCollisions();
     }
 
     protected void ApplyChargedElementRules()
@@ -670,40 +669,6 @@ public class Bullet : MonoBehaviour
         }
 
         return Utils.IsLayer(other.gameObject.layer, GameLayers.Player) || Utils.GetPlayerTarget(other) != null;
-    }
-
-    private static void ConfigureLayerCollisions()
-    {
-        ConfigureBulletLayer(GameLayers.PlayerBullet, GameLayers.Ground, GameLayers.Obstacle, GameLayers.Platform, GameLayers.Trigger, GameLayers.Enemy, GameLayers.Water);
-        ConfigureBulletLayer(GameLayers.EnemyBullet, GameLayers.Ground, GameLayers.Obstacle, GameLayers.Platform, GameLayers.Player, GameLayers.Water);
-    }
-
-    private static void ConfigureBulletLayer(string bulletLayerName, params string[] targetLayerNames)
-    {
-        int bulletLayer = LayerMask.NameToLayer(bulletLayerName);
-        if (bulletLayer < 0)
-        {
-            return;
-        }
-
-        for (int layer = 0; layer < 32; layer++)
-        {
-            Physics2D.IgnoreLayerCollision(bulletLayer, layer, true);
-        }
-
-        for (int i = 0; i < targetLayerNames.Length; i++)
-        {
-            EnableLayerCollision(bulletLayer, targetLayerNames[i]);
-        }
-    }
-
-    private static void EnableLayerCollision(int bulletLayer, string targetLayerName)
-    {
-        int targetLayer = LayerMask.NameToLayer(targetLayerName);
-        if (targetLayer >= 0)
-        {
-            Physics2D.IgnoreLayerCollision(bulletLayer, targetLayer, false);
-        }
     }
 
     private static string GetBulletLayerName(BulletSource bulletSource)

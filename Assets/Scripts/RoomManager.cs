@@ -19,6 +19,7 @@ public class RoomManager : MonoBehaviour
     [SerializeField] private bool buildConfiguredExitTriggers;
     [SerializeField] private float boundaryTransitionEpsilon = 0.02f;
     [SerializeField] private float transitionInset = 0.05f;
+    [SerializeField] private float coordinateEntryForwardInset = 0.25f;
     [SerializeField] private bool validateRoomParenting = true;
     [SerializeField] private bool drawDebugGizmos = true;
 
@@ -56,6 +57,13 @@ public class RoomManager : MonoBehaviour
         {
             Instance = null;
         }
+    }
+
+    private void OnValidate()
+    {
+        boundaryTransitionEpsilon = Mathf.Max(0f, boundaryTransitionEpsilon);
+        transitionInset = Mathf.Max(0f, transitionInset);
+        coordinateEntryForwardInset = Mathf.Max(0f, coordinateEntryForwardInset);
     }
 
     private void Update()
@@ -121,6 +129,7 @@ public class RoomManager : MonoBehaviour
         targetPlayer.SetInputLocked(true);
         SetActiveRoom(targetRoom);
         targetPlayer.TeleportTo(spawnPoint.transform.position, spawnPoint.FacingDirection);
+        Physics2D.SyncTransforms();
 
         if (cameraRig != null)
         {
@@ -150,6 +159,7 @@ public class RoomManager : MonoBehaviour
         if (player != null)
         {
             player.TeleportTo(targetPosition, facingDirection);
+            Physics2D.SyncTransforms();
         }
 
         if (cameraRig != null)
@@ -373,22 +383,24 @@ public class RoomManager : MonoBehaviour
         Vector3 targetPosition = playerPosition;
         Vector3 colliderOffset = playerBounds.center - playerPosition;
         Vector3 extents = playerBounds.extents;
+        float edgeInset = transitionInset;
+        float entryInset = Mathf.Max(coordinateEntryForwardInset, boundaryTransitionEpsilon * 2f);
 
         if (side == RoomExitSide.Left || side == RoomExitSide.Right)
         {
             float desiredCenterX = side == RoomExitSide.Right
-                ? targetRect.xMin + extents.x + transitionInset
-                : targetRect.xMax - extents.x - transitionInset;
-            float desiredCenterY = Mathf.Clamp(playerBounds.center.y, targetRect.yMin + extents.y + transitionInset, targetRect.yMax - extents.y - transitionInset);
+                ? targetRect.xMin + extents.x + entryInset
+                : targetRect.xMax - extents.x - entryInset;
+            float desiredCenterY = Mathf.Clamp(playerBounds.center.y, targetRect.yMin + extents.y + edgeInset, targetRect.yMax - extents.y - edgeInset);
             targetPosition.x = desiredCenterX - colliderOffset.x;
             targetPosition.y = desiredCenterY - colliderOffset.y;
             return targetPosition;
         }
 
         float desiredCenterYVertical = side == RoomExitSide.Up
-            ? targetRect.yMin + extents.y + transitionInset
-            : targetRect.yMax - extents.y - transitionInset;
-        float desiredCenterXVertical = Mathf.Clamp(playerBounds.center.x, targetRect.xMin + extents.x + transitionInset, targetRect.xMax - extents.x - transitionInset);
+            ? targetRect.yMin + extents.y + entryInset
+            : targetRect.yMax - extents.y - entryInset;
+        float desiredCenterXVertical = Mathf.Clamp(playerBounds.center.x, targetRect.xMin + extents.x + edgeInset, targetRect.xMax - extents.x - edgeInset);
         targetPosition.x = desiredCenterXVertical - colliderOffset.x;
         targetPosition.y = desiredCenterYVertical - colliderOffset.y;
         return targetPosition;

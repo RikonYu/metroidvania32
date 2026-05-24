@@ -18,14 +18,6 @@ public static class GameLayers
     public const string PlayerBullet = "PlayerBullet";
     public const string EnemyBullet = "EnemyBullet";
 
-    public static void EnsurePlayerTerrainCollisions()
-    {
-        EnableLayerCollision(Player, Ground);
-        EnableLayerCollision(Player, Obstacle);
-        EnableLayerCollision(Player, PierceObstacle);
-        EnableLayerCollision(Player, Platform);
-    }
-
     public static void ApplyTo(GameObject target, string layerName)
     {
         if (target == null)
@@ -51,15 +43,5 @@ public static class GameLayers
 #endif
 
         ApplyTo(target, layerName);
-    }
-
-    private static void EnableLayerCollision(string layerNameA, string layerNameB)
-    {
-        int layerA = LayerMask.NameToLayer(layerNameA);
-        int layerB = LayerMask.NameToLayer(layerNameB);
-        if (layerA >= 0 && layerB >= 0)
-        {
-            Physics2D.IgnoreLayerCollision(layerA, layerB, false);
-        }
     }
 }

@@ -17,6 +17,9 @@ public class MCController : MonoBehaviour
     [SerializeField] private float jumpGroundIgnoreTime = 0.08f;
     [SerializeField] private float fallGravityMultiplier = 1.8f;
     [SerializeField] private float lowJumpGravityMultiplier = 2.2f;
+    [SerializeField] private float oneWayPlatformDropInputThreshold = 0.5f;
+    [SerializeField] private float oneWayPlatformDropIgnoreTime = 0.25f;
+    [SerializeField] private float oneWayPlatformDropVelocity = 2f;
 
     [Header("Ground Check")]
     [SerializeField] private Vector2 groundCheckOffset = new Vector2(0f, -1.05f);
@@ -72,6 +75,7 @@ public class MCController : MonoBehaviour
 
     private Rigidbody2D body;
     private Animator[] animators;
+    private Collider2D[] playerCollisionColliders = new Collider2D[0];
     private RigidbodyConstraints2D movementConstraints;
     private ContactFilter2D movementContactFilter;
     private readonly ContactPoint2D[] supportContacts = new ContactPoint2D[MaxSupportContacts];
@@ -102,6 +106,8 @@ public class MCController : MonoBehaviour
     private float fullChargeAutoFireCounter;
     private WaterZone currentWaterZone;
     private WaterZone breathWaterZone;
+    private Collider2D ignoredOneWayPlatform;
+    private float oneWayPlatformDropIgnoreCounter;
     private PlayerRespawn playerRespawn;
     private float burningTimeRemaining;
     private float burningDamagePerSecond;
@@ -143,6 +149,7 @@ public class MCController : MonoBehaviour
         body = GetComponent<Rigidbody2D>();
         body.freezeRotation = true;
         CacheAnimators();
+        CachePlayerCollisionColliders();
         movementConstraints = body.constraints;
         defaultGravityScale = body.gravityScale;
         CachePlayerRespawn();
@@ -150,7 +157,6 @@ public class MCController : MonoBehaviour
         ResetStamina();
         EnsureLayerMasks();
         UpdateMovementContactFilter();
-        GameLayers.EnsurePlayerTerrainCollisions();
     }
 
     private void Reset()
@@ -171,6 +177,9 @@ public class MCController : MonoBehaviour
     {
         groundContactMinNormalY = Mathf.Clamp01(groundContactMinNormalY);
         jumpGroundIgnoreTime = Mathf.Max(0f, jumpGroundIgnoreTime);
+        oneWayPlatformDropInputThreshold = Mathf.Clamp01(oneWayPlatformDropInputThreshold);
+        oneWayPlatformDropIgnoreTime = Mathf.Max(0f, oneWayPlatformDropIgnoreTime);
+        oneWayPlatformDropVelocity = Mathf.Max(0f, oneWayPlatformDropVelocity);
         idleEdgeSlipInputThreshold = Mathf.Max(0f, idleEdgeSlipInputThreshold);
         dashDistance = Mathf.Max(0f, dashDistance);
         dashDuration = Mathf.Max(0.01f, dashDuration);
@@ -203,6 +212,7 @@ public class MCController : MonoBehaviour
         activeSwirls.Clear();
         currentWaterZone = null;
         breathWaterZone = null;
+        RestoreOneWayPlatformCollision();
 
         if (body != null)
         {
@@ -246,7 +256,10 @@ public class MCController : MonoBehaviour
 
         if (!IsUnderwater && Input.GetKeyDown(KeyCode.Space))
         {
-            jumpBufferCounter = jumpBufferTime;
+            if (!TryDropThroughOneWayPlatform())
+            {
+                jumpBufferCounter = jumpBufferTime;
+            }
         }
 
         if (Input.GetKeyDown(dashKey))
@@ -274,6 +287,7 @@ public class MCController : MonoBehaviour
     private void FixedUpdate()
     {
         bool wasGroundedOnSlope = IsGrounded && SlopeMovement.IsSlopeNormal(currentGroundNormal);
+        UpdateOneWayPlatformDrop();
         UpdateGroundedState();
 
         if (isFrozen)
@@ -337,6 +351,7 @@ public class MCController : MonoBehaviour
     {
         ClearWaterState();
         activeSwirls.Clear();
+        RestoreOneWayPlatformCollision();
         hasUsedDoubleJump = false;
         groundIgnoreCounter = 0f;
         transform.position = position;
@@ -592,6 +607,123 @@ public class MCController : MonoBehaviour
             && !isFrozen
             && !isDashing
             && !isDashRecoiling;
+    }
+
+    private bool TryDropThroughOneWayPlatform()
+    {
+        if (inputY > -oneWayPlatformDropInputThreshold
+            || !IsGrounded
+            || currentGround == null
+            || body == null)
+        {
+            return false;
+        }
+
+        PlatformConfig platformConfig = currentGround.GetComponentInParent<PlatformConfig>();
+        if (platformConfig == null || !platformConfig.OneWay || !IsAbovePlatform(currentGround))
+        {
+            return false;
+        }
+
+        BeginOneWayPlatformDrop(currentGround);
+        return true;
+    }
+
+    private void BeginOneWayPlatformDrop(Collider2D platformCollider)
+    {
+        RestoreOneWayPlatformCollision();
+
+        ignoredOneWayPlatform = platformCollider;
+        oneWayPlatformDropIgnoreCounter = oneWayPlatformDropIgnoreTime;
+        SetOneWayPlatformCollisionIgnored(true);
+
+        jumpBufferCounter = 0f;
+        coyoteCounter = 0f;
+        currentGround = null;
+        currentGroundNormal = Vector2.up;
+        IsGrounded = false;
+        IsOnSafeGround = false;
+        SetEdgeSlipLock(false);
+
+        Vector2 velocity = body.velocity;
+        velocity.y = Mathf.Min(velocity.y, -oneWayPlatformDropVelocity * GameTime.WorldScale);
+        body.velocity = velocity;
+    }
+
+    private void UpdateOneWayPlatformDrop()
+    {
+        if (ignoredOneWayPlatform == null)
+        {
+            return;
+        }
+
+        oneWayPlatformDropIgnoreCounter = Mathf.Max(0f, oneWayPlatformDropIgnoreCounter - Time.fixedDeltaTime);
+        if (!ignoredOneWayPlatform.enabled || !ignoredOneWayPlatform.gameObject.activeInHierarchy)
+        {
+            RestoreOneWayPlatformCollision();
+            return;
+        }
+
+        if (oneWayPlatformDropIgnoreCounter <= 0f && HasClearedIgnoredOneWayPlatform())
+        {
+            RestoreOneWayPlatformCollision();
+        }
+    }
+
+    private bool HasClearedIgnoredOneWayPlatform()
+    {
+        if (ignoredOneWayPlatform == null || !TryGetPlayerBounds(out Bounds playerBounds))
+        {
+            return true;
+        }
+
+        Bounds platformBounds = ignoredOneWayPlatform.bounds;
+        return !playerBounds.Intersects(platformBounds)
+            || playerBounds.max.y <= platformBounds.max.y - 0.01f;
+    }
+
+    private void RestoreOneWayPlatformCollision()
+    {
+        if (ignoredOneWayPlatform != null)
+        {
+            SetOneWayPlatformCollisionIgnored(false);
+        }
+
+        ignoredOneWayPlatform = null;
+        oneWayPlatformDropIgnoreCounter = 0f;
+    }
+
+    private void SetOneWayPlatformCollisionIgnored(bool ignored)
+    {
+        CachePlayerCollisionColliders();
+        for (int i = 0; i < playerCollisionColliders.Length; i++)
+        {
+            Collider2D playerCollider = playerCollisionColliders[i];
+            if (playerCollider != null && ignoredOneWayPlatform != null)
+            {
+                Physics2D.IgnoreCollision(playerCollider, ignoredOneWayPlatform, ignored);
+            }
+        }
+    }
+
+    private bool IsOneWayPlatformDropIgnored(Collider2D collider2D)
+    {
+        return collider2D != null && ignoredOneWayPlatform != null && collider2D == ignoredOneWayPlatform;
+    }
+
+    private bool IsAbovePlatform(Collider2D platformCollider)
+    {
+        if (platformCollider == null)
+        {
+            return false;
+        }
+
+        if (!TryGetPlayerBounds(out Bounds playerBounds))
+        {
+            return transform.position.y >= platformCollider.bounds.center.y;
+        }
+
+        return playerBounds.min.y >= platformCollider.bounds.center.y;
     }
 
     private void ApplyUnderwaterMovement()
@@ -1153,6 +1285,47 @@ public class MCController : MonoBehaviour
         animators = GetComponentsInChildren<Animator>(true);
     }
 
+    private void CachePlayerCollisionColliders()
+    {
+        Collider2D[] colliders = GetComponentsInChildren<Collider2D>(true);
+        List<Collider2D> solidColliders = new List<Collider2D>();
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null && !colliders[i].isTrigger)
+            {
+                solidColliders.Add(colliders[i]);
+            }
+        }
+
+        playerCollisionColliders = solidColliders.ToArray();
+    }
+
+    private bool TryGetPlayerBounds(out Bounds bounds)
+    {
+        CachePlayerCollisionColliders();
+        bounds = new Bounds(transform.position, Vector3.zero);
+        bool hasBounds = false;
+        for (int i = 0; i < playerCollisionColliders.Length; i++)
+        {
+            Collider2D playerCollider = playerCollisionColliders[i];
+            if (playerCollider == null || !playerCollider.enabled)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = playerCollider.bounds;
+                hasBounds = true;
+                continue;
+            }
+
+            bounds.Encapsulate(playerCollider.bounds);
+        }
+
+        return hasBounds;
+    }
+
     private void ApplyAnimatorSpeed()
     {
         if (animators == null || animators.Length == 0)
@@ -1233,6 +1406,13 @@ public class MCController : MonoBehaviour
             Vector2 center = (Vector2)transform.position + groundCheckOffset;
             currentGround = Physics2D.OverlapBox(center, groundCheckSize, 0f, movementGroundMask);
             currentGroundNormal = Vector2.up;
+        }
+
+        if (IsOneWayPlatformDropIgnored(currentGround))
+        {
+            currentGround = null;
+            currentGroundNormal = Vector2.up;
+            hasFrontGroundSupport = false;
         }
 
         IsGrounded = currentGround != null;
