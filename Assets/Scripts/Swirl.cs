@@ -148,6 +148,13 @@ public class Swirl : MonoBehaviour
         if (bullet != null)
         {
             bullet.SetWorldVelocity(GetAppliedVelocity(bullet.WorldVelocity));
+            return;
+        }
+
+        IceObstacle iceObstacle = other.GetComponentInParent<IceObstacle>();
+        if (iceObstacle != null)
+        {
+            iceObstacle.ApplySwirlVelocity(GetAppliedVelocity(iceObstacle.WorldVelocity), IsVerticalDirection());
         }
     }
 

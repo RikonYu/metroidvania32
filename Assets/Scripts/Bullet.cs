@@ -19,6 +19,8 @@ public enum BulletElement
 [RequireComponent(typeof(Collider2D))]
 public class Bullet : MonoBehaviour
 {
+    private static Bullet activePlayerIceArrow;
+
     [SerializeField] private BulletSource source = BulletSource.Player;
     [SerializeField] private Vector2 direction = Vector2.right;
     [SerializeField] private float speed = 16f;
@@ -92,6 +94,16 @@ public class Bullet : MonoBehaviour
         get { return worldVelocity; }
     }
 
+    public bool IsPlayerIceArrow
+    {
+        get { return source == BulletSource.Player && elemental == BulletElement.Ice; }
+    }
+
+    public bool IsUnderwater
+    {
+        get { return WaterZone.GetZoneAtPoint(GetCurrentPosition()) != null; }
+    }
+
     protected virtual void Awake()
     {
         CacheRigidbody();
@@ -100,6 +112,7 @@ public class Bullet : MonoBehaviour
         ResetRangeOrigin();
         ResetVelocity();
         FaceVelocity();
+        RegisterActivePlayerIceArrowIfNeeded();
     }
 
     protected virtual void OnEnable()
@@ -109,6 +122,7 @@ public class Bullet : MonoBehaviour
         ResetRangeOrigin();
         ResetVelocity();
         FaceVelocity();
+        RegisterActivePlayerIceArrowIfNeeded();
     }
 
     protected virtual void FixedUpdate()
@@ -124,8 +138,14 @@ public class Bullet : MonoBehaviour
 
     protected virtual void OnDisable()
     {
+        ClearActivePlayerIceArrow();
         waterZones.Clear();
         currentWaterZone = null;
+    }
+
+    protected virtual void OnDestroy()
+    {
+        ClearActivePlayerIceArrow();
     }
 
     protected virtual void OnValidate()
@@ -176,6 +196,7 @@ public class Bullet : MonoBehaviour
         ResetRangeOrigin();
         ResetVelocity();
         FaceVelocity();
+        RegisterActivePlayerIceArrowIfNeeded();
     }
 
     protected void SetElemental(BulletElement bulletElement)
@@ -201,6 +222,16 @@ public class Bullet : MonoBehaviour
     public void AddWorldVelocity(Vector2 velocity)
     {
         SetWorldVelocity(worldVelocity + velocity);
+    }
+
+    public static bool TryDetonateActivePlayerIceArrow(IceObstacle iceObstaclePrefab)
+    {
+        if (activePlayerIceArrow == null)
+        {
+            return false;
+        }
+
+        return activePlayerIceArrow.TryDetonatePlayerIceArrow(iceObstaclePrefab);
     }
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -365,7 +396,7 @@ public class Bullet : MonoBehaviour
             return false;
         }
 
-        Vector2 currentPosition = body != null ? body.position : (Vector2)transform.position;
+        Vector2 currentPosition = GetCurrentPosition();
         if ((currentPosition - rangeOrigin).sqrMagnitude <= maxRange * maxRange)
         {
             return false;
@@ -377,7 +408,7 @@ public class Bullet : MonoBehaviour
 
     private void RefreshWaterZone()
     {
-        Vector2 position = body != null ? body.position : (Vector2)transform.position;
+        Vector2 position = GetCurrentPosition();
         WaterZone positionWaterZone = WaterZone.GetZoneAtPoint(position);
         if (positionWaterZone != null)
         {
@@ -647,7 +678,7 @@ public class Bullet : MonoBehaviour
 
     protected Vector2 GetExplosionCenter(Collider2D firstHit)
     {
-        Vector2 fallback = body != null ? body.position : (Vector2)transform.position;
+        Vector2 fallback = GetCurrentPosition();
         if (firstHit == null)
         {
             return fallback;
@@ -674,6 +705,111 @@ public class Bullet : MonoBehaviour
         }
 
         return Utils.IsLayer(other.gameObject.layer, GameLayers.Player) || Utils.GetPlayerTarget(other) != null;
+    }
+
+    private bool TryDetonatePlayerIceArrow(IceObstacle iceObstaclePrefab)
+    {
+        if (!isActiveAndEnabled || !IsPlayerIceArrow || !IsUnderwater)
+        {
+            return false;
+        }
+
+        IceObstacle iceObstacle = CreateIceObstacleForDetonation(iceObstaclePrefab, GetCurrentPosition());
+        if (iceObstacle == null)
+        {
+            return false;
+        }
+
+        ParentToActiveRoom(iceObstacle.transform);
+        Physics2D.SyncTransforms();
+
+        Collider2D iceCollider = iceObstacle.GetComponent<Collider2D>();
+        if (FreezeEnemiesInIceObstacleRange(iceCollider))
+        {
+            Destroy(iceObstacle.gameObject);
+        }
+        else
+        {
+            iceObstacle.RegisterAsPlayerGenerated();
+        }
+
+        Destroy(gameObject);
+        return true;
+    }
+
+    private static IceObstacle CreateIceObstacleForDetonation(IceObstacle iceObstaclePrefab, Vector2 position)
+    {
+        if (iceObstaclePrefab != null)
+        {
+            return Instantiate(iceObstaclePrefab, position, Quaternion.identity);
+        }
+
+        GameObject iceObstacleObject = new GameObject("IceObstacle");
+        iceObstacleObject.transform.position = position;
+        iceObstacleObject.AddComponent<Rigidbody2D>();
+        iceObstacleObject.AddComponent<BoxCollider2D>();
+        return iceObstacleObject.AddComponent<IceObstacle>();
+    }
+
+    private static void ParentToActiveRoom(Transform target)
+    {
+        if (target == null || !RoomManager.HasInstance || RoomManager.Instance.ActiveRoom == null)
+        {
+            return;
+        }
+
+        target.SetParent(RoomManager.Instance.ActiveRoom.transform, true);
+    }
+
+    private static bool FreezeEnemiesInIceObstacleRange(Collider2D iceCollider)
+    {
+        if (iceCollider == null)
+        {
+            return false;
+        }
+
+        ContactFilter2D filter = new ContactFilter2D();
+        filter.useTriggers = true;
+
+        List<Collider2D> hits = new List<Collider2D>();
+        iceCollider.OverlapCollider(filter, hits);
+
+        HashSet<EnemyController> affectedEnemies = new HashSet<EnemyController>();
+        for (int i = 0; i < hits.Count; i++)
+        {
+            EnemyController enemy = Utils.GetEnemyTarget(hits[i]);
+            if (enemy != null && affectedEnemies.Add(enemy))
+            {
+                enemy.ApplyFrozenOrSlowed();
+            }
+        }
+
+        return affectedEnemies.Count > 0;
+    }
+
+    private Vector2 GetCurrentPosition()
+    {
+        CacheRigidbody();
+        return body != null ? body.position : (Vector2)transform.position;
+    }
+
+    private void RegisterActivePlayerIceArrowIfNeeded()
+    {
+        if (IsPlayerIceArrow)
+        {
+            activePlayerIceArrow = this;
+            return;
+        }
+
+        ClearActivePlayerIceArrow();
+    }
+
+    private void ClearActivePlayerIceArrow()
+    {
+        if (activePlayerIceArrow == this)
+        {
+            activePlayerIceArrow = null;
+        }
     }
 
     private static string GetBulletLayerName(BulletSource bulletSource)

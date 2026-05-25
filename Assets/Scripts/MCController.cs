@@ -51,6 +51,7 @@ public class MCController : MonoBehaviour
     [SerializeField] private float fullChargeGroundMoveSpeedMultiplier = 0.45f;
     [SerializeField] private float aerialBulletTimeScale = 0.35f;
     [SerializeField] private BulletElement bulletElement = BulletElement.None;
+    [SerializeField] private IceObstacle iceObstaclePrefab;
 
     [Header("Healing")]
     [SerializeField] private KeyCode useHealthBottleKey = KeyCode.R;
@@ -1016,6 +1017,11 @@ public class MCController : MonoBehaviour
     {
         if (Input.GetMouseButtonDown(0))
         {
+            if (TryDetonateActiveIceArrow())
+            {
+                return;
+            }
+
             BeginAttackCharge();
         }
 
@@ -1046,6 +1052,11 @@ public class MCController : MonoBehaviour
         {
             FireChargedBullet();
         }
+    }
+
+    private bool TryDetonateActiveIceArrow()
+    {
+        return global::Bullet.TryDetonateActivePlayerIceArrow(iceObstaclePrefab);
     }
 
     private void BeginAttackCharge()
