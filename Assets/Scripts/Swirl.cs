@@ -136,6 +136,11 @@ public class Swirl : MonoBehaviour
             return;
         }
 
+        if (other.GetComponentInParent<WaterChargeAI>() != null)
+        {
+            return;
+        }
+
         MCController player = other.GetComponentInParent<MCController>();
         if (player != null)
         {

@@ -363,6 +363,11 @@ public class MCController : MonoBehaviour
         UpdateGroundedState();
     }
 
+    public void OnEnteredNewRoom()
+    {
+        ResetStamina();
+    }
+
     public void ClearVelocity()
     {
         if (body != null)

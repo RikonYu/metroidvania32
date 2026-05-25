@@ -129,6 +129,7 @@ public class RoomManager : MonoBehaviour
         targetPlayer.SetInputLocked(true);
         SetActiveRoom(targetRoom);
         targetPlayer.TeleportTo(spawnPoint.transform.position, spawnPoint.FacingDirection);
+        targetPlayer.OnEnteredNewRoom();
         Physics2D.SyncTransforms();
 
         if (cameraRig != null)
@@ -159,6 +160,7 @@ public class RoomManager : MonoBehaviour
         if (player != null)
         {
             player.TeleportTo(targetPosition, facingDirection);
+            player.OnEnteredNewRoom();
             Physics2D.SyncTransforms();
         }
 
