@@ -219,6 +219,15 @@ public class PlayerRespawn : MonoBehaviour
         }
     }
 
+    public void ClearFrozen()
+    {
+        isFrozen = false;
+        if (player != null)
+        {
+            player.ClearFrozen();
+        }
+    }
+
     public void ApplyPoisoned()
     {
         if (!isRespawning)

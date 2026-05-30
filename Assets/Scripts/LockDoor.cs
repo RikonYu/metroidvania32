@@ -2,6 +2,7 @@ using UnityEngine;
 
 public class LockDoor : MonoBehaviour
 {
+    [SerializeField] private bool destroyOnUnlock;
     [SerializeField] private bool deactivateOnUnlock = true;
     [SerializeField] private bool disableCollidersOnUnlock = true;
     [SerializeField] private bool disableRenderersOnUnlock;
@@ -21,6 +22,12 @@ public class LockDoor : MonoBehaviour
         }
 
         unlocked = true;
+
+        if (destroyOnUnlock)
+        {
+            Destroy(gameObject);
+            return;
+        }
 
         if (deactivateOnUnlock)
         {

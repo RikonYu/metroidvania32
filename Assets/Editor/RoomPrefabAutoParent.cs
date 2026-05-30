@@ -7,29 +7,85 @@ using UnityEngine.SceneManagement;
 [InitializeOnLoad]
 public static class RoomPrefabAutoParent
 {
+    private const int AutoParentSettleFrames = 3;
+    private const int WorldRestoreGuardFrames = 8;
     private const float RestorePositionEpsilon = 0.0001f;
 
     private static bool autoParentQueued;
     private static bool restoreQueued;
+    private static int autoParentFramesRemaining;
+    private static int restoreFramesRemaining;
     private static readonly Dictionary<int, PendingWorldRestore> pendingWorldRestores = new Dictionary<int, PendingWorldRestore>();
 
     static RoomPrefabAutoParent()
     {
         EditorApplication.hierarchyChanged += QueueAutoParent;
+        EditorApplication.update += OnEditorUpdate;
     }
 
     private static void QueueAutoParent()
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode || autoParentQueued || Utils.IsInPrefabMode())
+        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
         {
             return;
         }
 
         autoParentQueued = true;
-        EditorApplication.delayCall += AutoParentColliderObjects;
+        autoParentFramesRemaining = AutoParentSettleFrames;
     }
 
-    private static void AutoParentColliderObjects()
+    private static void OnEditorUpdate()
+    {
+        UpdateAutoParentQueue();
+        UpdateWorldRestoreGuard();
+    }
+
+    private static void UpdateAutoParentQueue()
+    {
+        if (!autoParentQueued)
+        {
+            return;
+        }
+
+        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
+        {
+            autoParentQueued = false;
+            return;
+        }
+
+        if (autoParentFramesRemaining > 0)
+        {
+            autoParentFramesRemaining--;
+            return;
+        }
+
+        AutoParentRoomObjects();
+    }
+
+    private static void UpdateWorldRestoreGuard()
+    {
+        if (!restoreQueued)
+        {
+            return;
+        }
+
+        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
+        {
+            restoreQueued = false;
+            pendingWorldRestores.Clear();
+            return;
+        }
+
+        RestorePendingWorldTransforms();
+        restoreFramesRemaining--;
+        if (restoreFramesRemaining <= 0)
+        {
+            restoreQueued = false;
+            pendingWorldRestores.Clear();
+        }
+    }
+
+    private static void AutoParentRoomObjects()
     {
         autoParentQueued = false;
 
@@ -49,6 +105,18 @@ public static class RoomPrefabAutoParent
             }
 
             AddTargetBounds(targetBounds, target, colliders[i].bounds);
+        }
+
+        BubbleBump[] bubbleBumps = Resources.FindObjectsOfTypeAll<BubbleBump>();
+        for (int i = 0; i < bubbleBumps.Length; i++)
+        {
+            Transform target = GetAutoParentTarget(bubbleBumps[i]);
+            if (target == null)
+            {
+                continue;
+            }
+
+            AddTargetBounds(targetBounds, target, new Bounds(target.position, Vector3.zero));
         }
 
         foreach (KeyValuePair<Transform, Bounds> targetBound in targetBounds)
@@ -83,9 +151,31 @@ public static class RoomPrefabAutoParent
         return target;
     }
 
+    private static Transform GetAutoParentTarget(BubbleBump bubbleBump)
+    {
+        if (bubbleBump == null || EditorUtility.IsPersistent(bubbleBump))
+        {
+            return null;
+        }
+
+        Transform target = GetPrefabInstanceRoot(bubbleBump);
+        if (!Utils.IsSceneTransform(target) || target.GetComponentInParent<Room>(true) != null || ShouldSkip(target))
+        {
+            return null;
+        }
+
+        return target;
+    }
+
     private static Transform GetPrefabInstanceRoot(Collider2D collider2D)
     {
         GameObject prefabRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(collider2D.gameObject);
+        return prefabRoot != null ? prefabRoot.transform : null;
+    }
+
+    private static Transform GetPrefabInstanceRoot(Component component)
+    {
+        GameObject prefabRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(component.gameObject);
         return prefabRoot != null ? prefabRoot.transform : null;
     }
 
@@ -196,29 +286,20 @@ public static class RoomPrefabAutoParent
 
         if (restoreQueued)
         {
+            restoreFramesRemaining = Mathf.Max(restoreFramesRemaining, WorldRestoreGuardFrames);
             return;
         }
 
         restoreQueued = true;
-        EditorApplication.delayCall += RestorePendingWorldTransforms;
+        restoreFramesRemaining = WorldRestoreGuardFrames;
     }
 
     private static void RestorePendingWorldTransforms()
     {
-        restoreQueued = false;
-
-        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
-        {
-            pendingWorldRestores.Clear();
-            return;
-        }
-
         foreach (PendingWorldRestore pendingRestore in pendingWorldRestores.Values)
         {
             RestorePendingWorldTransform(pendingRestore);
         }
-
-        pendingWorldRestores.Clear();
     }
 
     private static void RestorePendingWorldTransform(PendingWorldRestore pendingRestore)

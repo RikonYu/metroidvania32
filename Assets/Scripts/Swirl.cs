@@ -160,6 +160,13 @@ public class Swirl : MonoBehaviour
         if (iceObstacle != null)
         {
             iceObstacle.ApplySwirlVelocity(GetAppliedVelocity(iceObstacle.WorldVelocity), IsVerticalDirection());
+            return;
+        }
+
+        Bubble bubble = other.GetComponentInParent<Bubble>();
+        if (bubble != null)
+        {
+            bubble.ApplySwirlVelocity(GetForceVelocity());
         }
     }
 
@@ -227,13 +234,18 @@ public class Swirl : MonoBehaviour
 
     private Vector2 GetAppliedVelocity(Vector2 currentVelocity)
     {
-        Vector2 forceVelocity = (Vector2)GameDirection.ToVector3(forceDirection) * speed;
+        Vector2 forceVelocity = GetForceVelocity();
         if (IsVerticalDirection())
         {
             return new Vector2(currentVelocity.x, forceVelocity.y);
         }
 
         return new Vector2(forceVelocity.x, currentVelocity.y);
+    }
+
+    private Vector2 GetForceVelocity()
+    {
+        return (Vector2)GameDirection.ToVector3(forceDirection) * speed;
     }
 
     private bool IsVerticalDirection()

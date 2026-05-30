@@ -2,6 +2,11 @@ using UnityEngine;
 
 public class FireLock : Lock
 {
+    protected override bool ShouldUseTriggerCollider
+    {
+        get { return false; }
+    }
+
     public void UnlockFromChargedFireExplosion(Bullet bullet)
     {
         if (!IsValidUnlockBullet(bullet))

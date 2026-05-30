@@ -73,6 +73,11 @@ public static class Utils
         return other != null ? other.GetComponentInParent<EnemyController>() : null;
     }
 
+    public static Bubble GetBubbleTarget(Collider2D other)
+    {
+        return other != null ? other.GetComponentInParent<Bubble>() : null;
+    }
+
     public static PlayerRespawn GetPlayerTarget(Collider2D other)
     {
         return other != null ? other.GetComponentInParent<PlayerRespawn>() : null;

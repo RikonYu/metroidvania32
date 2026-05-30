@@ -8,6 +8,11 @@ public class Lock : MonoBehaviour
 
     private bool unlocked;
 
+    protected virtual bool ShouldUseTriggerCollider
+    {
+        get { return true; }
+    }
+
     public bool IsUnlocked
     {
         get { return unlocked; }
@@ -88,7 +93,7 @@ public class Lock : MonoBehaviour
         Collider2D lockCollider = GetComponent<Collider2D>();
         if (lockCollider != null)
         {
-            lockCollider.isTrigger = true;
+            lockCollider.isTrigger = ShouldUseTriggerCollider;
         }
     }
 

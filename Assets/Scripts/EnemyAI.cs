@@ -196,6 +196,15 @@ public class EnemyAI : MonoBehaviour
         }
 
         Vector2 moveInput = GetPatrolMoveInput(toPoint);
+        if (moveInput.sqrMagnitude > 0.0001f && enemy.ConsumeBlockingPathTerrainContact(moveInput))
+        {
+            AdvancePatrolPoint(patrolPointCount);
+            patrolPointIndex = ClampPatrolPointIndex(patrolPointIndex);
+            targetPoint = GetPatrolPoint(patrolPointIndex);
+            toPoint = targetPoint - currentPosition;
+            moveInput = GetPatrolMoveInput(toPoint);
+        }
+
         UpdateFacingFromMove(moveInput);
         enemy.Move(moveInput);
     }

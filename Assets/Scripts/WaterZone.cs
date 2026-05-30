@@ -37,6 +37,17 @@ public class WaterZone : MonoBehaviour
 
     private Collider2D waterCollider;
 
+    public bool CleansePoison()
+    {
+        if (!isPoisonous)
+        {
+            return false;
+        }
+
+        isPoisonous = false;
+        return true;
+    }
+
     public static WaterZone GetZoneAtPoint(Vector2 worldPoint)
     {
         if (AirZone.HasAirAtPoint(worldPoint))

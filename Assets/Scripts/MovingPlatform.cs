@@ -10,13 +10,16 @@ public enum MovingPlatformPathMode
 
 [DefaultExecutionOrder(100)]
 [RequireComponent(typeof(Rigidbody2D))]
-[RequireComponent(typeof(Collider2D))]
 public class MovingPlatform : MonoBehaviour
 {
+    private const int MaxPathCastHits = 16;
+    private const float PathCollisionOpposingDot = -0.25f;
+    private const float PathCollisionSkin = 0.01f;
+
     [Header("Path")]
-    [SerializeField] private bool includeInitialPosition = true;
-    [SerializeField] private List<Vector2> pathPoints = new List<Vector2>();
-    [SerializeField] private MovingPlatformPathMode pathMode = MovingPlatformPathMode.PingPong;
+    [SerializeField] protected bool includeInitialPosition = true;
+    [SerializeField] protected List<Vector2> pathPoints = new List<Vector2>();
+    [SerializeField] protected MovingPlatformPathMode pathMode = MovingPlatformPathMode.PingPong;
     [SerializeField] private float moveSpeed = 3f;
     [SerializeField] private float waitAtPoints = 0f;
 
@@ -28,6 +31,9 @@ public class MovingPlatform : MonoBehaviour
     [SerializeField] private bool applyPlatformLayer = true;
 
     private Rigidbody2D body;
+    private Collider2D[] pathCollisionColliders;
+    private ContactFilter2D pathTerrainContactFilter;
+    private readonly RaycastHit2D[] pathCastHits = new RaycastHit2D[MaxPathCastHits];
     private Vector2 initialPosition;
     private Vector2 currentVelocity;
     private Vector2 currentDelta;
@@ -35,6 +41,8 @@ public class MovingPlatform : MonoBehaviour
     private int pathDirection = 1;
     private float waitCounter;
     private bool moving;
+    private bool pathBlockedByTerrain;
+    private int pathBlockedTargetPointIndex = -1;
 
     public bool IsMoving
     {
@@ -49,6 +57,21 @@ public class MovingPlatform : MonoBehaviour
     public Vector2 CurrentDelta
     {
         get { return currentDelta; }
+    }
+
+    public bool IncludeInitialPosition
+    {
+        get { return includeInitialPosition; }
+    }
+
+    public MovingPlatformPathMode PathMode
+    {
+        get { return pathMode; }
+    }
+
+    public IReadOnlyList<Vector2> PathPoints
+    {
+        get { return pathPoints; }
     }
 
     protected virtual void Reset()
@@ -74,7 +97,7 @@ public class MovingPlatform : MonoBehaviour
         ConfigurePlatform();
     }
 
-    private void FixedUpdate()
+    protected virtual void FixedUpdate()
     {
         if (!moving && CanStartMoving())
         {
@@ -86,6 +109,7 @@ public class MovingPlatform : MonoBehaviour
 
     public void StartMoving()
     {
+        ClearPathTerrainBlock();
         moving = true;
     }
 
@@ -94,6 +118,37 @@ public class MovingPlatform : MonoBehaviour
         moving = false;
         currentVelocity = Vector2.zero;
         currentDelta = Vector2.zero;
+        ClearPathTerrainBlock();
+    }
+
+    public void AddPathPoint(Vector2 worldPoint)
+    {
+        pathPoints.Add(worldPoint);
+    }
+
+    public void SetPathPoint(int index, Vector2 worldPoint)
+    {
+        if (index < 0 || index >= pathPoints.Count)
+        {
+            return;
+        }
+
+        pathPoints[index] = worldPoint;
+    }
+
+    public void RemovePathPointAt(int index)
+    {
+        if (index < 0 || index >= pathPoints.Count)
+        {
+            return;
+        }
+
+        pathPoints.RemoveAt(index);
+    }
+
+    public void ClearPathPoints()
+    {
+        pathPoints.Clear();
     }
 
     protected virtual bool CanStartMoving()
@@ -111,11 +166,21 @@ public class MovingPlatform : MonoBehaviour
         return true;
     }
 
+    protected virtual float GetSegmentMoveSpeed(Vector2 currentPosition, Vector2 targetPosition)
+    {
+        return moveSpeed;
+    }
+
+    protected bool IsMovingTowardInitialPosition
+    {
+        get { return includeInitialPosition && targetPointIndex == 0; }
+    }
+
     private void StepMovement()
     {
         currentVelocity = Vector2.zero;
         currentDelta = Vector2.zero;
-        if (!moving || !CanKeepMoving() || body == null || GetPathPointCount() < 2 || moveSpeed <= 0f)
+        if (!moving || !CanKeepMoving() || body == null || GetPathPointCount() < 2)
         {
             return;
         }
@@ -126,10 +191,38 @@ public class MovingPlatform : MonoBehaviour
             return;
         }
 
+        if (pathBlockedByTerrain)
+        {
+            if (pathBlockedTargetPointIndex == targetPointIndex)
+            {
+                ClearPathTerrainBlock();
+                AdvanceTargetPoint();
+                return;
+            }
+
+            ClearPathTerrainBlock();
+        }
+
         Vector2 currentPosition = body.position;
         Vector2 targetPosition = GetPathPoint(targetPointIndex);
-        Vector2 nextPosition = Vector2.MoveTowards(currentPosition, targetPosition, moveSpeed * GameTime.FixedDeltaTime);
-        currentDelta = nextPosition - currentPosition;
+        float segmentMoveSpeed = Mathf.Max(0f, GetSegmentMoveSpeed(currentPosition, targetPosition));
+        if (segmentMoveSpeed <= 0f)
+        {
+            return;
+        }
+
+        Vector2 nextPosition = Vector2.MoveTowards(currentPosition, targetPosition, segmentMoveSpeed * GameTime.FixedDeltaTime);
+        Vector2 requestedDelta = nextPosition - currentPosition;
+        if (TryGetPathTerrainBlockedDelta(requestedDelta, out Vector2 blockedDelta))
+        {
+            currentDelta = blockedDelta;
+            currentVelocity = currentDelta / Time.fixedDeltaTime;
+            body.MovePosition(currentPosition + blockedDelta);
+            AdvanceTargetPoint();
+            return;
+        }
+
+        currentDelta = requestedDelta;
         currentVelocity = currentDelta / Time.fixedDeltaTime;
         body.MovePosition(nextPosition);
 
@@ -177,6 +270,16 @@ public class MovingPlatform : MonoBehaviour
         }
 
         targetPointIndex = Mathf.Clamp(targetPointIndex + pathDirection, 0, pointCount - 1);
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        TrackPathTerrainCollision(collision);
+    }
+
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        TrackPathTerrainCollision(collision);
     }
 
     private int GetInitialTargetIndex()
@@ -228,6 +331,105 @@ public class MovingPlatform : MonoBehaviour
         return pathPoints[Mathf.Clamp(index, 0, pathPoints.Count - 1)];
     }
 
+    private bool TryGetPathTerrainBlockedDelta(Vector2 requestedDelta, out Vector2 blockedDelta)
+    {
+        blockedDelta = requestedDelta;
+        if (requestedDelta.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        CachePathCollisionColliders();
+        UpdatePathTerrainContactFilter();
+
+        Vector2 direction = requestedDelta.normalized;
+        float distance = requestedDelta.magnitude;
+        bool blocked = false;
+        float allowedDistance = distance;
+        for (int colliderIndex = 0; colliderIndex < pathCollisionColliders.Length; colliderIndex++)
+        {
+            Collider2D collider2D = pathCollisionColliders[colliderIndex];
+            if (collider2D == null || !collider2D.enabled)
+            {
+                continue;
+            }
+
+            int hitCount = collider2D.Cast(direction, pathTerrainContactFilter, pathCastHits, distance + PathCollisionSkin);
+            for (int hitIndex = 0; hitIndex < hitCount; hitIndex++)
+            {
+                RaycastHit2D hit = pathCastHits[hitIndex];
+                if (hit.collider == null || hit.collider.transform.IsChildOf(transform) || !IsBlockingPathNormal(direction, hit.normal))
+                {
+                    continue;
+                }
+
+                blocked = true;
+                allowedDistance = Mathf.Min(allowedDistance, Mathf.Max(0f, hit.distance - PathCollisionSkin));
+            }
+        }
+
+        blockedDelta = direction * allowedDistance;
+        return blocked;
+    }
+
+    private void TrackPathTerrainCollision(Collision2D collision)
+    {
+        if (!moving || waitCounter > 0f || collision == null || body == null || pathBlockedByTerrain || GetPathPointCount() < 2)
+        {
+            return;
+        }
+
+        Collider2D terrainCollider = GetExternalTerrainCollider(collision);
+        if (terrainCollider == null)
+        {
+            return;
+        }
+
+        Vector2 toTarget = GetPathPoint(targetPointIndex) - body.position;
+        Vector2 pathDirectionToTarget = Utils.NormalizeOrZero(toTarget);
+        if (pathDirectionToTarget.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        for (int i = 0; i < collision.contactCount; i++)
+        {
+            ContactPoint2D contact = collision.GetContact(i);
+            if (IsBlockingPathNormal(pathDirectionToTarget, contact.normal))
+            {
+                pathBlockedByTerrain = true;
+                pathBlockedTargetPointIndex = targetPointIndex;
+                return;
+            }
+        }
+    }
+
+    private Collider2D GetExternalTerrainCollider(Collision2D collision)
+    {
+        if (IsExternalTerrainCollider(collision.collider))
+        {
+            return collision.collider;
+        }
+
+        return IsExternalTerrainCollider(collision.otherCollider) ? collision.otherCollider : null;
+    }
+
+    private bool IsExternalTerrainCollider(Collider2D collider2D)
+    {
+        return Utils.IsTerrain(collider2D) && !collider2D.transform.IsChildOf(transform);
+    }
+
+    private bool IsBlockingPathNormal(Vector2 pathDirectionToTarget, Vector2 normal)
+    {
+        return Vector2.Dot(pathDirectionToTarget, normal) <= PathCollisionOpposingDot;
+    }
+
+    private void ClearPathTerrainBlock()
+    {
+        pathBlockedByTerrain = false;
+        pathBlockedTargetPointIndex = -1;
+    }
+
     private void CacheComponents()
     {
         if (body == null)
@@ -235,6 +437,22 @@ public class MovingPlatform : MonoBehaviour
             body = GetComponent<Rigidbody2D>();
         }
 
+        CachePathCollisionColliders();
+        UpdatePathTerrainContactFilter();
+    }
+
+    private void CachePathCollisionColliders()
+    {
+        if (pathCollisionColliders == null || pathCollisionColliders.Length == 0)
+        {
+            pathCollisionColliders = GetComponentsInChildren<Collider2D>();
+        }
+    }
+
+    private void UpdatePathTerrainContactFilter()
+    {
+        pathTerrainContactFilter.useTriggers = false;
+        pathTerrainContactFilter.SetLayerMask(LayerMask.GetMask(GameLayers.Ground, GameLayers.Obstacle, GameLayers.Platform));
     }
 
     private void ConfigurePlatform()

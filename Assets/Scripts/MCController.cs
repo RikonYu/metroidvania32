@@ -39,6 +39,7 @@ public class MCController : MonoBehaviour
     [SerializeField] private float dashCooldown = 0.2f;
     [SerializeField] private float dashRecoilDistance = 1f;
     [SerializeField] private float dashRecoilDuration = 0.08f;
+    [SerializeField, Range(0f, 1f)] private float underwaterDashDistanceMultiplier = 0.5f;
     [SerializeField] private LayerMask dashStopMask;
 
     [Header("Weapon")]
@@ -68,6 +69,16 @@ public class MCController : MonoBehaviour
     [SerializeField] private float staminaDrainPerSecond = 1f;
     [SerializeField] private float staminaRecoveryPerSecond = 2f;
     [SerializeField] private float currentStamina = 5f;
+
+    [Header("Water Ledge Climb")]
+    [SerializeField] private LayerMask waterLedgeClimbMask;
+    [SerializeField] private float waterLedgeClimbInputThreshold = 0.5f;
+    [SerializeField] private float waterLedgeClimbProbeDistance = 0.6f;
+    [SerializeField] private float waterLedgeClimbProbeHeight = 1.2f;
+    [SerializeField] private float waterLedgeClimbMaxSurfaceYDiff = 0.5f;
+    [SerializeField] private float waterLedgeClimbForwardSlopeMaxSurfaceYDiff = 1f;
+    [SerializeField] private float waterLedgeClimbHorizontalInset = 0.05f;
+    [SerializeField] private float waterLedgeClimbVerticalClearance = 0.02f;
 
     [Header("Elemental Status")]
     [SerializeField] private bool isBurning;
@@ -100,6 +111,8 @@ public class MCController : MonoBehaviour
     private float dashTimeRemaining;
     private float dashRecoilTimeRemaining;
     private float dashCooldownRemaining;
+    private float dashTerminalSpeed;
+    private float dashDecayDuration;
     private bool isChargingAttack;
     private bool isAttackFullyCharged;
     private bool bulletTimeStartedForCharge;
@@ -145,6 +158,11 @@ public class MCController : MonoBehaviour
         get { return body != null ? body.velocity : Vector2.zero; }
     }
 
+    public float BubblePushVelocity
+    {
+        get { return GetBubblePushVelocity(); }
+    }
+
     private void Awake()
     {
         body = GetComponent<Rigidbody2D>();
@@ -187,6 +205,7 @@ public class MCController : MonoBehaviour
         dashCooldown = Mathf.Max(0f, dashCooldown);
         dashRecoilDistance = Mathf.Max(0f, dashRecoilDistance);
         dashRecoilDuration = Mathf.Max(0.01f, dashRecoilDuration);
+        underwaterDashDistanceMultiplier = Mathf.Clamp01(underwaterDashDistanceMultiplier);
         bulletSpawnOffset = Mathf.Max(0f, bulletSpawnOffset);
         healthBottleHealAmount = Mathf.Max(0, healthBottleHealAmount);
         maxHp = Mathf.Max(1, maxHp);
@@ -200,6 +219,13 @@ public class MCController : MonoBehaviour
         staminaDrainPerSecond = Mathf.Max(0f, staminaDrainPerSecond);
         staminaRecoveryPerSecond = Mathf.Max(0f, staminaRecoveryPerSecond);
         currentStamina = Mathf.Clamp(currentStamina, 0f, maxStamina);
+        waterLedgeClimbInputThreshold = Mathf.Clamp01(waterLedgeClimbInputThreshold);
+        waterLedgeClimbProbeDistance = Mathf.Max(0.01f, waterLedgeClimbProbeDistance);
+        waterLedgeClimbProbeHeight = Mathf.Max(0.01f, waterLedgeClimbProbeHeight);
+        waterLedgeClimbMaxSurfaceYDiff = Mathf.Max(0f, waterLedgeClimbMaxSurfaceYDiff);
+        waterLedgeClimbForwardSlopeMaxSurfaceYDiff = Mathf.Max(waterLedgeClimbMaxSurfaceYDiff, waterLedgeClimbForwardSlopeMaxSurfaceYDiff);
+        waterLedgeClimbHorizontalInset = Mathf.Max(0f, waterLedgeClimbHorizontalInset);
+        waterLedgeClimbVerticalClearance = Mathf.Max(0f, waterLedgeClimbVerticalClearance);
         EnsureLayerMasks();
         UpdateMovementContactFilter();
     }
@@ -495,6 +521,19 @@ public class MCController : MonoBehaviour
         ApplyAnimatorSpeed();
     }
 
+    public void ClearFrozen()
+    {
+        if (!isFrozen)
+        {
+            return;
+        }
+
+        isFrozen = false;
+        freezeTimeRemaining = 0f;
+        RestoreGravity();
+        ApplyAnimatorSpeed();
+    }
+
     public void ApplyPoisoned()
     {
         if (IsAlive)
@@ -551,6 +590,27 @@ public class MCController : MonoBehaviour
         }
 
         body.velocity = velocity;
+    }
+
+    private float GetBubblePushVelocity()
+    {
+        if (inputLocked || isFrozen || isDashing || isDashRecoiling || Mathf.Abs(inputX) <= 0.01f)
+        {
+            return 0f;
+        }
+
+        if (IsUnderwater && currentWaterZone != null)
+        {
+            return inputX * currentWaterZone.PlayerHorizontalSwimSpeed;
+        }
+
+        float currentMoveSpeed = moveSpeed;
+        if (IsGrounded && isAttackFullyCharged)
+        {
+            currentMoveSpeed *= fullChargeGroundMoveSpeedMultiplier;
+        }
+
+        return inputX * currentMoveSpeed;
     }
 
     private bool ApplyJump()
@@ -746,6 +806,11 @@ public class MCController : MonoBehaviour
         jumpBufferCounter = 0f;
         SetEdgeSlipLock(false);
 
+        if (TryApplyWaterLedgeClimb())
+        {
+            return;
+        }
+
         Vector2 input = new Vector2(inputX, inputY);
         Vector2 targetVelocity = new Vector2(
             input.x * currentWaterZone.PlayerHorizontalSwimSpeed,
@@ -757,6 +822,162 @@ public class MCController : MonoBehaviour
             ? currentWaterZone.PlayerSwimAcceleration
             : currentWaterZone.PlayerSwimDeceleration;
         body.velocity = Vector2.MoveTowards(body.velocity, targetVelocity, rate * GameTime.FixedDeltaTime);
+    }
+
+    private bool TryApplyWaterLedgeClimb()
+    {
+        if (currentWaterZone == null || body == null)
+        {
+            return false;
+        }
+
+        if (inputY < waterLedgeClimbInputThreshold || Mathf.Abs(inputX) < waterLedgeClimbInputThreshold)
+        {
+            return false;
+        }
+
+        if (!TryGetPlayerBounds(out Bounds playerBounds))
+        {
+            return false;
+        }
+
+        if (!currentWaterZone.TryGetGizmoBounds(out Bounds waterBounds))
+        {
+            return false;
+        }
+
+        float waterSurfaceY = waterBounds.max.y;
+        if (playerBounds.min.y >= waterSurfaceY || playerBounds.max.y <= waterSurfaceY)
+        {
+            return false;
+        }
+
+        int direction = inputX > 0f ? 1 : -1;
+        if (!TryFindWaterLedge(playerBounds, waterSurfaceY, direction, out Collider2D ledgeCollider, out Vector2 ledgePoint))
+        {
+            return false;
+        }
+
+        Vector3 targetPosition = GetWaterLedgeClimbPosition(playerBounds, ledgePoint);
+        if (WouldOverlapWaterLedgeTerrain(targetPosition, playerBounds, ledgeCollider))
+        {
+            return false;
+        }
+
+        body.position = targetPosition;
+        body.velocity = Vector2.zero;
+        ClearWaterState();
+        hasUsedDoubleJump = false;
+        Physics2D.SyncTransforms();
+        UpdateGroundedState();
+        return true;
+    }
+
+    private bool TryFindWaterLedge(Bounds playerBounds, float waterSurfaceY, int direction, out Collider2D ledgeCollider, out Vector2 ledgePoint)
+    {
+        ledgeCollider = null;
+        ledgePoint = Vector2.zero;
+
+        float centerOffset = Mathf.Max(playerBounds.extents.x + waterLedgeClimbHorizontalInset, waterLedgeClimbProbeDistance);
+        float rayX = direction > 0
+            ? playerBounds.max.x + centerOffset
+            : playerBounds.min.x - centerOffset;
+        float probeAboveSurface = Mathf.Max(
+            waterLedgeClimbProbeHeight * 0.5f,
+            waterLedgeClimbForwardSlopeMaxSurfaceYDiff + waterLedgeClimbVerticalClearance);
+        float probeBelowSurface = waterLedgeClimbProbeHeight * 0.5f;
+        Vector2 rayOrigin = new Vector2(rayX, waterSurfaceY + probeAboveSurface);
+        RaycastHit2D[] hits = Physics2D.RaycastAll(rayOrigin, Vector2.down, probeAboveSurface + probeBelowSurface, waterLedgeClimbMask);
+
+        float bestYDiff = float.PositiveInfinity;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit2D hit = hits[i];
+            if (!IsValidWaterLedgeHit(hit, playerBounds, waterSurfaceY, direction))
+            {
+                continue;
+            }
+
+            float yDiff = Mathf.Abs(hit.point.y - waterSurfaceY);
+            if (yDiff < bestYDiff)
+            {
+                bestYDiff = yDiff;
+                ledgeCollider = hit.collider;
+                ledgePoint = hit.point;
+            }
+        }
+
+        return ledgeCollider != null;
+    }
+
+    private bool IsValidWaterLedgeHit(RaycastHit2D hit, Bounds playerBounds, float waterSurfaceY, int direction)
+    {
+        Collider2D candidate = hit.collider;
+        if (candidate == null || candidate.isTrigger || candidate.transform.IsChildOf(transform))
+        {
+            return false;
+        }
+
+        if (hit.normal.y <= groundContactMinNormalY)
+        {
+            return false;
+        }
+
+        float yDiff = Mathf.Abs(hit.point.y - waterSurfaceY);
+        bool withinNormalSurfaceRange = yDiff < waterLedgeClimbMaxSurfaceYDiff;
+        bool withinForwardSlopeRange = yDiff <= waterLedgeClimbForwardSlopeMaxSurfaceYDiff && IsForwardGroundSlope(hit, direction);
+        if (!withinNormalSurfaceRange && !withinForwardSlopeRange)
+        {
+            return false;
+        }
+
+        if (direction > 0)
+        {
+            return hit.point.x > playerBounds.center.x;
+        }
+
+        return hit.point.x < playerBounds.center.x;
+    }
+
+    private bool IsForwardGroundSlope(RaycastHit2D hit, int direction)
+    {
+        Collider2D candidate = hit.collider;
+        return candidate != null
+            && Utils.IsLayer(candidate.gameObject.layer, GameLayers.Ground)
+            && SlopeMovement.IsSlopeNormal(hit.normal)
+            && hit.normal.x * direction < -0.01f;
+    }
+
+    private Vector3 GetWaterLedgeClimbPosition(Bounds playerBounds, Vector2 ledgePoint)
+    {
+        Vector3 colliderOffset = playerBounds.center - transform.position;
+        float targetCenterY = ledgePoint.y + playerBounds.extents.y + waterLedgeClimbVerticalClearance;
+        float targetCenterX = ledgePoint.x;
+        Vector3 targetCenter = new Vector3(targetCenterX, targetCenterY, playerBounds.center.z);
+        return targetCenter - colliderOffset;
+    }
+
+    private bool WouldOverlapWaterLedgeTerrain(Vector3 targetPosition, Bounds currentPlayerBounds, Collider2D ledgeCollider)
+    {
+        Vector3 colliderOffset = currentPlayerBounds.center - transform.position;
+        Vector2 targetCenter = targetPosition + colliderOffset;
+        Vector2 targetSize = new Vector2(
+            Mathf.Max(0.01f, currentPlayerBounds.size.x - waterLedgeClimbVerticalClearance * 2f),
+            Mathf.Max(0.01f, currentPlayerBounds.size.y - waterLedgeClimbVerticalClearance * 2f));
+        Collider2D[] hits = Physics2D.OverlapBoxAll(targetCenter, targetSize, 0f, waterLedgeClimbMask);
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D hit = hits[i];
+            if (hit == null || hit.isTrigger || hit.transform.IsChildOf(transform) || hit == ledgeCollider)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private bool ApplySwirlMovement()
@@ -991,17 +1212,26 @@ public class MCController : MonoBehaviour
         }
 
         MovingPlatform movingPlatform = GetCurrentMovingPlatform();
-        if (movingPlatform == null || movingPlatform.CurrentDelta.sqrMagnitude <= 0.0001f)
+        if (movingPlatform != null && movingPlatform.CurrentDelta.sqrMagnitude > 0.0001f)
         {
-            return;
+            body.position += movingPlatform.CurrentDelta;
         }
 
-        body.position += movingPlatform.CurrentDelta;
+        Bubble bubble = GetCurrentBubble();
+        if (bubble != null && bubble.CurrentDelta.sqrMagnitude > 0.0001f)
+        {
+            body.position += bubble.CurrentDelta;
+        }
     }
 
     private MovingPlatform GetCurrentMovingPlatform()
     {
         return currentGround != null ? currentGround.GetComponentInParent<MovingPlatform>() : null;
+    }
+
+    private Bubble GetCurrentBubble()
+    {
+        return currentGround != null ? currentGround.GetComponentInParent<Bubble>() : null;
     }
 
     private void UpdateTimers()
@@ -1201,6 +1431,7 @@ public class MCController : MonoBehaviour
         dashDirection = FacingDirection == GameDirection.Left ? -1 : 1;
         dashTimeRemaining = dashDuration;
         dashCooldownRemaining = dashCooldown;
+        ConfigureDashSpeedCurve();
         isDashing = true;
         isDashRecoiling = false;
         jumpBufferCounter = 0f;
@@ -1285,12 +1516,49 @@ public class MCController : MonoBehaviour
 
     private float GetDashSpeed()
     {
-        return (dashDistance / Mathf.Max(0.01f, dashDuration)) * GameTime.WorldScale;
+        float duration = Mathf.Max(0.01f, dashDuration);
+        float elapsed = Mathf.Clamp(duration - dashTimeRemaining, 0f, duration);
+        float curveT = dashDecayDuration <= 0f ? 1f : Mathf.Clamp01(elapsed / dashDecayDuration);
+        return Mathf.Lerp(GetDashInitialSpeed(), dashTerminalSpeed, curveT) * GameTime.WorldScale;
     }
 
     private float GetDashRecoilSpeed()
     {
         return (dashRecoilDistance / Mathf.Max(0.01f, dashRecoilDuration)) * GameTime.WorldScale;
+    }
+
+    private void ConfigureDashSpeedCurve()
+    {
+        bool startedUnderwater = IsUnderwater;
+        dashTerminalSpeed = startedUnderwater ? GetUnderwaterDashTerminalSpeed() : moveSpeed;
+        dashDecayDuration = startedUnderwater
+            ? GetUnderwaterDashDecayDuration(GetDashInitialSpeed(), dashTerminalSpeed)
+            : Mathf.Max(0.01f, dashDuration);
+    }
+
+    private float GetDashInitialSpeed()
+    {
+        float duration = Mathf.Max(0.01f, dashDuration);
+        return Mathf.Max(0f, 2f * dashDistance / duration - moveSpeed);
+    }
+
+    private float GetUnderwaterDashTerminalSpeed()
+    {
+        return currentWaterZone != null ? currentWaterZone.PlayerHorizontalSwimSpeed : moveSpeed;
+    }
+
+    private float GetUnderwaterDashDecayDuration(float initialSpeed, float terminalSpeed)
+    {
+        float duration = Mathf.Max(0.01f, dashDuration);
+        float speedDelta = initialSpeed - terminalSpeed;
+        if (speedDelta <= 0.0001f)
+        {
+            return 0f;
+        }
+
+        float targetDistance = dashDistance * underwaterDashDistanceMultiplier;
+        float terminalDistance = terminalSpeed * duration;
+        return Mathf.Clamp(2f * (targetDistance - terminalDistance) / speedDelta, 0f, duration);
     }
 
     private void SetDashGravity()
@@ -1439,6 +1707,15 @@ public class MCController : MonoBehaviour
         {
             hasUsedDoubleJump = false;
         }
+
+        if (IsGrounded)
+        {
+            Bubble bubble = GetCurrentBubble();
+            if (bubble != null)
+            {
+                bubble.NotifyPlayerStanding(this);
+            }
+        }
     }
 
     private bool ShouldIgnoreGroundAfterJump()
@@ -1476,6 +1753,11 @@ public class MCController : MonoBehaviour
         if (dashStopMask == 0)
         {
             dashStopMask = LayerMask.GetMask(GameLayers.Ground, GameLayers.Obstacle, GameLayers.PierceObstacle, GameLayers.Platform, GameLayers.Enemy);
+        }
+
+        if (waterLedgeClimbMask == 0)
+        {
+            waterLedgeClimbMask = LayerMask.GetMask(GameLayers.Ground, GameLayers.Obstacle, GameLayers.Platform);
         }
 
         IncludePierceObstacleWithObstacleDashMask();
@@ -1558,6 +1840,13 @@ public class MCController : MonoBehaviour
             return;
         }
 
+        Bubble bubble = Utils.GetBubbleTarget(collision.collider);
+        if (bubble != null)
+        {
+            bubble.DestroyBubble();
+            return;
+        }
+
         bool hitEnemy = Utils.IsEnemyCollider(collision.collider);
         if (!hitEnemy && !Utils.IsLayerInMask(collision.collider.gameObject.layer, dashStopMask))
         {
@@ -1574,6 +1863,13 @@ public class MCController : MonoBehaviour
     {
         if (!isDashing || other == null)
         {
+            return;
+        }
+
+        Bubble bubble = Utils.GetBubbleTarget(other);
+        if (bubble != null)
+        {
+            bubble.DestroyBubble();
             return;
         }
 

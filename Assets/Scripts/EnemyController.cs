@@ -12,6 +12,10 @@ public enum EnemyMovementKind
 public class EnemyController : MonoBehaviour
 {
     private const int MaxSupportContacts = 8;
+    private const int MaxPathTerrainContactNormals = 8;
+    private const float PathTerrainContactLifetimeMultiplier = 1.5f;
+    private const float PathCollisionOpposingDot = -0.25f;
+    private const float CrawlingPathBlockMaxAbsNormalY = 0.5f;
 
     [Header("Core")]
     [SerializeField] private EnemyMovementKind movementKind = EnemyMovementKind.Crawling;
@@ -45,6 +49,7 @@ public class EnemyController : MonoBehaviour
     private Animator[] animators;
     private ContactFilter2D movementContactFilter;
     private readonly ContactPoint2D[] supportContacts = new ContactPoint2D[MaxSupportContacts];
+    private readonly Vector2[] pathTerrainContactNormals = new Vector2[MaxPathTerrainContactNormals];
     private readonly List<WaterZone> waterZones = new List<WaterZone>();
     private Collider2D currentGround;
     private Vector2 currentGroundNormal = Vector2.up;
@@ -60,6 +65,8 @@ public class EnemyController : MonoBehaviour
     private float burningDamagePerSecond;
     private float burningDamageAccumulator;
     private float freezeTimeRemaining;
+    private int pathTerrainContactNormalCount;
+    private float pathTerrainContactsExpireAt = -1f;
 
     public EnemyMovementKind MovementKind
     {
@@ -345,6 +352,20 @@ public class EnemyController : MonoBehaviour
         ApplyAnimatorSpeed();
     }
 
+    public void ClearFrozenOrSlowed()
+    {
+        if (!isFrozen && !isIceSlowed)
+        {
+            return;
+        }
+
+        isFrozen = false;
+        isIceSlowed = false;
+        freezeTimeRemaining = 0f;
+        ApplyMovementKindPhysics();
+        ApplyAnimatorSpeed();
+    }
+
     public void ApplyPoisoned()
     {
         if (IsAlive && !IsInvincible)
@@ -419,6 +440,35 @@ public class EnemyController : MonoBehaviour
     public void ClearPatrolPoints()
     {
         patrolPoints.Clear();
+    }
+
+    public bool ConsumeBlockingPathTerrainContact(Vector2 moveDirection)
+    {
+        Vector2 normalizedDirection = Utils.NormalizeOrZero(moveDirection);
+        if (normalizedDirection.sqrMagnitude <= 0.0001f || Time.fixedTime > pathTerrainContactsExpireAt)
+        {
+            ClearPathTerrainContacts();
+            return false;
+        }
+
+        bool ignoreFloorContacts = movementKind == EnemyMovementKind.Crawling;
+        for (int i = 0; i < pathTerrainContactNormalCount; i++)
+        {
+            Vector2 normal = pathTerrainContactNormals[i];
+            if (ignoreFloorContacts && Mathf.Abs(normal.y) > CrawlingPathBlockMaxAbsNormalY)
+            {
+                continue;
+            }
+
+            if (Vector2.Dot(normalizedDirection, normal) <= PathCollisionOpposingDot)
+            {
+                ClearPathTerrainContacts();
+                return true;
+            }
+        }
+
+        ClearPathTerrainContacts();
+        return false;
     }
 
     public static void RespawnNonBossEnemies()
@@ -743,6 +793,49 @@ public class EnemyController : MonoBehaviour
         playerRespawn.TakeEnemyMeleeHit(this, knockbackDirection);
     }
 
+    private void TrackPathTerrainContact(Collision2D collision)
+    {
+        if (collision == null || pathTerrainContactNormalCount >= MaxPathTerrainContactNormals)
+        {
+            return;
+        }
+
+        Collider2D terrainCollider = GetExternalTerrainCollider(collision);
+        if (terrainCollider == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < collision.contactCount && pathTerrainContactNormalCount < MaxPathTerrainContactNormals; i++)
+        {
+            pathTerrainContactNormals[pathTerrainContactNormalCount] = collision.GetContact(i).normal;
+            pathTerrainContactNormalCount++;
+        }
+
+        pathTerrainContactsExpireAt = Time.fixedTime + Time.fixedDeltaTime * PathTerrainContactLifetimeMultiplier;
+    }
+
+    private Collider2D GetExternalTerrainCollider(Collision2D collision)
+    {
+        if (IsExternalTerrainCollider(collision.collider))
+        {
+            return collision.collider;
+        }
+
+        return IsExternalTerrainCollider(collision.otherCollider) ? collision.otherCollider : null;
+    }
+
+    private bool IsExternalTerrainCollider(Collider2D collider2D)
+    {
+        return Utils.IsTerrain(collider2D) && !collider2D.transform.IsChildOf(transform);
+    }
+
+    private void ClearPathTerrainContacts()
+    {
+        pathTerrainContactNormalCount = 0;
+        pathTerrainContactsExpireAt = -1f;
+    }
+
     private void HandleWaterContact(Collider2D other)
     {
         if (!IsAlive || isUnderwaterEnemy)
@@ -831,11 +924,13 @@ public class EnemyController : MonoBehaviour
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
+        TrackPathTerrainContact(collision);
         HandlePlayerContact(collision.collider);
     }
 
     private void OnCollisionStay2D(Collision2D collision)
     {
+        TrackPathTerrainContact(collision);
         HandlePlayerContact(collision.collider);
     }
 

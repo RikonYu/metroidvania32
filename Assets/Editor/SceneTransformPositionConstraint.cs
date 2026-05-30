@@ -7,6 +7,7 @@ using UnityEngine.SceneManagement;
 [InitializeOnLoad]
 public static class SceneTransformPositionConstraint
 {
+    private const int PositionSettleFrames = 3;
     private const float GridSize = 0.5f;
     private const float DefaultZ = 0f;
     private const float CameraZ = -10f;
@@ -15,13 +16,22 @@ public static class SceneTransformPositionConstraint
     private static bool snapAllQueued;
     private static bool snapSelectedQueued;
     private static bool isSnapping;
+    private static int snapAllFramesRemaining;
+    private static int snapSelectedFramesRemaining;
 
     static SceneTransformPositionConstraint()
     {
         SceneView.duringSceneGui += OnSceneGui;
         EditorApplication.hierarchyChanged += QueueSnapAll;
+        EditorApplication.update += OnEditorUpdate;
         Undo.postprocessModifications += OnPostprocessModifications;
         QueueSnapAll();
+    }
+
+    private static void OnEditorUpdate()
+    {
+        UpdateSnapAllQueue();
+        UpdateSnapSelectedQueue();
     }
 
     private static void OnSceneGui(SceneView sceneView)
@@ -63,24 +73,68 @@ public static class SceneTransformPositionConstraint
 
     private static void QueueSnapAll()
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode || snapAllQueued || Utils.IsInPrefabMode())
+        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
         {
             return;
         }
 
         snapAllQueued = true;
-        EditorApplication.delayCall += SnapAllSceneTransforms;
+        snapAllFramesRemaining = PositionSettleFrames;
     }
 
     private static void QueueSnapSelected()
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode || snapSelectedQueued || Utils.IsInPrefabMode())
+        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
         {
             return;
         }
 
         snapSelectedQueued = true;
-        EditorApplication.delayCall += SnapSelectedTransforms;
+        snapSelectedFramesRemaining = PositionSettleFrames;
+    }
+
+    private static void UpdateSnapAllQueue()
+    {
+        if (!snapAllQueued)
+        {
+            return;
+        }
+
+        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
+        {
+            snapAllQueued = false;
+            return;
+        }
+
+        if (snapAllFramesRemaining > 0)
+        {
+            snapAllFramesRemaining--;
+            return;
+        }
+
+        SnapAllSceneTransforms();
+    }
+
+    private static void UpdateSnapSelectedQueue()
+    {
+        if (!snapSelectedQueued)
+        {
+            return;
+        }
+
+        if (EditorApplication.isPlayingOrWillChangePlaymode || Utils.IsInPrefabMode())
+        {
+            snapSelectedQueued = false;
+            return;
+        }
+
+        if (snapSelectedFramesRemaining > 0)
+        {
+            snapSelectedFramesRemaining--;
+            return;
+        }
+
+        SnapSelectedTransforms();
     }
 
     private static void SnapAllSceneTransforms()
@@ -144,28 +198,41 @@ public static class SceneTransformPositionConstraint
         List<Transform> targets = new List<Transform>();
         foreach (Transform transform in transforms)
         {
-            Transform target = GetConstrainedTarget(transform);
-            if (target == null || !seen.Add(target) || ShouldSkip(target))
-            {
-                continue;
-            }
-
-            targets.Add(target);
+            CollectTargetAndChildren(transform, seen, targets);
         }
 
         targets.Sort((a, b) => GetDepth(a).CompareTo(GetDepth(b)));
         return targets;
     }
 
+    private static void CollectTargetAndChildren(Transform source, HashSet<Transform> seen, List<Transform> targets)
+    {
+        AddConstrainedTarget(source, seen, targets);
+        if (source == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.childCount; i++)
+        {
+            CollectTargetAndChildren(source.GetChild(i), seen, targets);
+        }
+    }
+
+    private static void AddConstrainedTarget(Transform source, HashSet<Transform> seen, List<Transform> targets)
+    {
+        Transform target = GetConstrainedTarget(source);
+        if (target == null || !seen.Add(target) || ShouldSkip(target))
+        {
+            return;
+        }
+
+        targets.Add(target);
+    }
+
     private static Transform GetConstrainedTarget(Transform source)
     {
         if (source == null)
-        {
-            return null;
-        }
-
-        GameObject prefabRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(source.gameObject);
-        if (prefabRoot != null && prefabRoot.transform != source)
         {
             return null;
         }
@@ -204,7 +271,8 @@ public static class SceneTransformPositionConstraint
     private static bool ShouldSkip(Transform target)
     {
         return !Utils.IsSceneTransform(target)
-            || target.GetComponentInParent<MCController>(true) != null;
+            || target.GetComponentInParent<MCController>(true) != null
+            || target.GetComponent<SpriteMask>() != null;
     }
 
     private static bool IsCameraTransform(Transform target)

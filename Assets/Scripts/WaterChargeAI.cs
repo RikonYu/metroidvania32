@@ -54,9 +54,9 @@ public class WaterChargeAI : EnemyAI
     [SerializeField] private WaterChargeAIState waterState = WaterChargeAIState.WanderPause;
 
     private Rigidbody2D body;
-    private Transform target;
-    private float targetSearchTimer;
-    private float stateTimer;
+    private Transform waterTarget;
+    private float waterTargetSearchTimer;
+    private float waterStateTimer;
     private Vector2 wanderTarget;
     private Vector2 alertTargetPosition;
     private Vector2 chargeDirection;
@@ -82,7 +82,7 @@ public class WaterChargeAI : EnemyAI
         RestoreDiveCollisions();
         CacheBody();
         CaptureInitialPatrolCenter();
-        targetSearchTimer = 0f;
+        waterTargetSearchTimer = 0f;
         terrainCollisionQueued = false;
         BeginWanderPause();
     }
@@ -190,8 +190,8 @@ public class WaterChargeAI : EnemyAI
             return;
         }
 
-        stateTimer -= deltaTime;
-        if (stateTimer <= 0f)
+        waterStateTimer -= deltaTime;
+        if (waterStateTimer <= 0f)
         {
             ChooseWanderTarget();
             waterState = WaterChargeAIState.WanderMove;
@@ -220,8 +220,8 @@ public class WaterChargeAI : EnemyAI
 
     private void UpdateAlertPause(float deltaTime)
     {
-        stateTimer -= deltaTime;
-        if (stateTimer > 0f)
+        waterStateTimer -= deltaTime;
+        if (waterStateTimer > 0f)
         {
             return;
         }
@@ -257,8 +257,8 @@ public class WaterChargeAI : EnemyAI
 
     private void UpdateBlockedPause(float deltaTime)
     {
-        stateTimer -= deltaTime;
-        if (stateTimer > 0f)
+        waterStateTimer -= deltaTime;
+        if (waterStateTimer > 0f)
         {
             return;
         }
@@ -291,7 +291,7 @@ public class WaterChargeAI : EnemyAI
 
         alertTargetPosition = targetPosition;
         waterState = WaterChargeAIState.AlertPause;
-        stateTimer = alertPauseDuration;
+        waterStateTimer = alertPauseDuration;
         StopEnemy();
         return true;
     }
@@ -300,7 +300,7 @@ public class WaterChargeAI : EnemyAI
     {
         RestoreDiveCollisions();
         waterState = WaterChargeAIState.WanderPause;
-        stateTimer = Random.Range(wanderPauseMin, wanderPauseMax);
+        waterStateTimer = Random.Range(wanderPauseMin, wanderPauseMax);
         StopEnemy();
     }
 
@@ -308,7 +308,7 @@ public class WaterChargeAI : EnemyAI
     {
         RestoreDiveCollisions();
         waterState = WaterChargeAIState.BlockedPause;
-        stateTimer = blockedPauseDuration;
+        waterStateTimer = blockedPauseDuration;
         StopEnemy();
     }
 
@@ -403,13 +403,13 @@ public class WaterChargeAI : EnemyAI
     private bool CanSeeTarget(out Vector2 targetPosition)
     {
         targetPosition = Vector2.zero;
-        if (target == null || !target.gameObject.activeInHierarchy)
+        if (waterTarget == null || !waterTarget.gameObject.activeInHierarchy)
         {
             return false;
         }
 
         Vector2 origin = GetPosition();
-        Vector2 targetPoint = target.position;
+        Vector2 targetPoint = waterTarget.position;
         if (WaterZone.GetZoneAtPoint(origin) == null || WaterZone.GetZoneAtPoint(targetPoint) == null)
         {
             return false;
@@ -446,31 +446,31 @@ public class WaterChargeAI : EnemyAI
     {
         if (waterTargetOverride != null)
         {
-            target = waterTargetOverride;
+            waterTarget = waterTargetOverride;
             return;
         }
 
-        if (target != null && target.gameObject.activeInHierarchy)
+        if (waterTarget != null && waterTarget.gameObject.activeInHierarchy)
         {
             return;
         }
 
-        targetSearchTimer -= deltaTime;
-        if (targetSearchTimer > 0f)
+        waterTargetSearchTimer -= deltaTime;
+        if (waterTargetSearchTimer > 0f)
         {
             return;
         }
 
-        targetSearchTimer = waterTargetSearchInterval;
+        waterTargetSearchTimer = waterTargetSearchInterval;
         MCController player = FindObjectOfType<MCController>();
         if (player != null)
         {
-            target = player.transform;
+            waterTarget = player.transform;
             return;
         }
 
         PlayerRespawn respawn = FindObjectOfType<PlayerRespawn>();
-        target = respawn != null ? respawn.transform : null;
+        waterTarget = respawn != null ? respawn.transform : null;
     }
 
     private void HandleTerrainCollision(Collision2D collision)

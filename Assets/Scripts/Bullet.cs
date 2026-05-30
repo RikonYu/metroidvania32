@@ -267,13 +267,37 @@ public class Bullet : MonoBehaviour
             return;
         }
 
+        if (TryActivateFireSwirl(other))
+        {
+            if (ShouldExplodeOnHit(other))
+            {
+                Explode(other);
+            }
+
+            Destroy(gameObject);
+            return;
+        }
+
         if (TryUnlockArrowLock(other))
         {
             Destroy(gameObject);
             return;
         }
 
-        if (!ShouldDestroyOnLayer(other.gameObject.layer))
+        Bubble bubble = Utils.GetBubbleTarget(other);
+        if (bubble != null)
+        {
+            if (ShouldExplodeOnHit(other))
+            {
+                Explode(other);
+            }
+
+            bubble.DestroyBubble();
+            Destroy(gameObject);
+            return;
+        }
+
+        if (!ShouldDestroyOnLayer(other.gameObject.layer) && !IsSpinWheelTarget(other))
         {
             return;
         }
@@ -298,6 +322,12 @@ public class Bullet : MonoBehaviour
         }
 
         Destroy(gameObject);
+    }
+
+    private bool TryActivateFireSwirl(Collider2D other)
+    {
+        FireSwirl fireSwirl = other != null ? other.GetComponentInParent<FireSwirl>() : null;
+        return fireSwirl != null && fireSwirl.TryActivateFromFireArrow(this, other);
     }
 
     private void IgnoreCollisionWith(Collider2D other)
@@ -517,6 +547,13 @@ public class Bullet : MonoBehaviour
     {
         if (source == BulletSource.Player)
         {
+            SpinWheel spinWheel = GetSpinWheelTarget(other);
+            if (spinWheel != null)
+            {
+                ApplyHitEffect(spinWheel);
+                return;
+            }
+
             EnemyController enemy = Utils.GetEnemyTarget(other);
             if (enemy != null)
             {
@@ -531,6 +568,16 @@ public class Bullet : MonoBehaviour
         {
             ApplyHitEffect(playerRespawn);
         }
+    }
+
+    private void ApplyHitEffect(SpinWheel spinWheel)
+    {
+        if (spinWheel == null || elemental != BulletElement.Ice)
+        {
+            return;
+        }
+
+        spinWheel.ApplyFrozen();
     }
 
     private void ApplyHitEffect(EnemyController enemy)
@@ -608,6 +655,7 @@ public class Bullet : MonoBehaviour
     {
         Vector2 center = GetExplosionCenter(firstHit);
         ApplyExplosionToFireLocks(center);
+        ApplyExplosionToBubbles(center);
 
         Collider2D[] hits = Physics2D.OverlapCircleAll(center, explosionRadius, GetEnemyTargetMask());
         if (source == BulletSource.Player)
@@ -646,6 +694,20 @@ public class Bullet : MonoBehaviour
             if (fireLock != null && affectedLocks.Add(fireLock))
             {
                 fireLock.UnlockFromChargedFireExplosion(this);
+            }
+        }
+    }
+
+    private void ApplyExplosionToBubbles(Vector2 center)
+    {
+        Collider2D[] hits = Physics2D.OverlapCircleAll(center, explosionRadius);
+        HashSet<Bubble> affectedBubbles = new HashSet<Bubble>();
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Bubble bubble = Utils.GetBubbleTarget(hits[i]);
+            if (bubble != null && affectedBubbles.Add(bubble))
+            {
+                bubble.DestroyBubble();
             }
         }
     }
@@ -690,6 +752,16 @@ public class Bullet : MonoBehaviour
     private int GetEnemyTargetMask()
     {
         return source == BulletSource.Player ? LayerMask.GetMask(GameLayers.Enemy) : LayerMask.GetMask(GameLayers.Player);
+    }
+
+    private bool IsSpinWheelTarget(Collider2D other)
+    {
+        return source == BulletSource.Player && GetSpinWheelTarget(other) != null;
+    }
+
+    private static SpinWheel GetSpinWheelTarget(Collider2D other)
+    {
+        return other != null ? other.GetComponentInParent<SpinWheel>() : null;
     }
 
     private bool IsEnemyTarget(Collider2D other)
@@ -775,6 +847,8 @@ public class Bullet : MonoBehaviour
         iceCollider.OverlapCollider(filter, hits);
 
         HashSet<EnemyController> affectedEnemies = new HashSet<EnemyController>();
+        HashSet<SpinWheel> affectedSpinWheels = new HashSet<SpinWheel>();
+        HashSet<Bubble> affectedBubbles = new HashSet<Bubble>();
         for (int i = 0; i < hits.Count; i++)
         {
             EnemyController enemy = Utils.GetEnemyTarget(hits[i]);
@@ -782,9 +856,21 @@ public class Bullet : MonoBehaviour
             {
                 enemy.ApplyFrozenOrSlowed();
             }
+
+            SpinWheel spinWheel = GetSpinWheelTarget(hits[i]);
+            if (spinWheel != null && affectedSpinWheels.Add(spinWheel))
+            {
+                spinWheel.ApplyFrozen();
+            }
+
+            Bubble bubble = Utils.GetBubbleTarget(hits[i]);
+            if (bubble != null && affectedBubbles.Add(bubble))
+            {
+                bubble.DestroyBubble();
+            }
         }
 
-        return affectedEnemies.Count > 0;
+        return affectedEnemies.Count > 0 || affectedSpinWheels.Count > 0 || affectedBubbles.Count > 0;
     }
 
     private Vector2 GetCurrentPosition()

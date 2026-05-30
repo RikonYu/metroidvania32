@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-[CustomEditor(typeof(MovingPlatform))]
+[CustomEditor(typeof(MovingPlatform), true)]
 [CanEditMultipleObjects]
 public class MovingPlatformEditor : Editor
 {
@@ -9,17 +9,6 @@ public class MovingPlatformEditor : Editor
 
     private static bool editPathPoints;
     private static int selectedPointIndex = -1;
-
-    private SerializedProperty includeInitialPositionProperty;
-    private SerializedProperty pathPointsProperty;
-    private SerializedProperty pathModeProperty;
-
-    private void OnEnable()
-    {
-        includeInitialPositionProperty = serializedObject.FindProperty("includeInitialPosition");
-        pathPointsProperty = serializedObject.FindProperty("pathPoints");
-        pathModeProperty = serializedObject.FindProperty("pathMode");
-    }
 
     public override void OnInspectorGUI()
     {
@@ -48,28 +37,38 @@ public class MovingPlatformEditor : Editor
 
     private void OnSceneGUI()
     {
-        serializedObject.Update();
-
         MovingPlatform platform = (MovingPlatform)target;
         DrawPath(platform);
 
         if (!editPathPoints)
         {
-            serializedObject.ApplyModifiedProperties();
             return;
         }
 
+        ReserveSceneInput();
         DrawEditablePathPoints(platform);
         HandleSceneInput(platform);
-        serializedObject.ApplyModifiedProperties();
+    }
+
+    private void ReserveSceneInput()
+    {
+        Event current = Event.current;
+        if (current == null || current.alt)
+        {
+            return;
+        }
+
+        if (current.type == EventType.Layout)
+        {
+            HandleUtility.AddDefaultControl(GUIUtility.GetControlID(FocusType.Passive));
+        }
     }
 
     private void DrawEditablePathPoints(MovingPlatform platform)
     {
-        for (int i = 0; i < pathPointsProperty.arraySize; i++)
+        for (int i = 0; i < platform.PathPoints.Count; i++)
         {
-            SerializedProperty pointProperty = pathPointsProperty.GetArrayElementAtIndex(i);
-            Vector3 point = pointProperty.vector2Value;
+            Vector3 point = platform.PathPoints[i];
             float handleSize = HandleUtility.GetHandleSize(point) * HandleSizeScale;
 
             Handles.color = selectedPointIndex == i ? Color.yellow : Color.magenta;
@@ -85,7 +84,7 @@ public class MovingPlatformEditor : Editor
             {
                 Undo.RecordObject(platform, "Move Moving Platform Path Point");
                 selectedPointIndex = i;
-                pointProperty.vector2Value = new Vector2(movedPoint.x, movedPoint.y);
+                platform.SetPathPoint(i, new Vector2(movedPoint.x, movedPoint.y));
                 EditorUtility.SetDirty(platform);
             }
 
@@ -126,7 +125,7 @@ public class MovingPlatformEditor : Editor
 
     private void DrawPath(MovingPlatform platform)
     {
-        int pointCount = GetPointCount();
+        int pointCount = GetPointCount(platform);
         if (pointCount <= 0)
         {
             return;
@@ -134,65 +133,62 @@ public class MovingPlatformEditor : Editor
 
         Handles.color = Color.magenta;
         Vector3 previous = GetPoint(platform, 0);
-        DrawPathPoint(previous, 0, includeInitialPositionProperty.boolValue);
+        DrawPathPoint(platform, previous, 0, platform.IncludeInitialPosition);
 
         for (int i = 1; i < pointCount; i++)
         {
             Vector3 point = GetPoint(platform, i);
             Handles.DrawLine(previous, point);
-            DrawPathPoint(point, i, false);
+            DrawPathPoint(platform, point, i, false);
             previous = point;
         }
 
-        if ((MovingPlatformPathMode)pathModeProperty.enumValueIndex == MovingPlatformPathMode.Loop && pointCount > 2)
+        if (platform.PathMode == MovingPlatformPathMode.Loop && pointCount > 2)
         {
             Handles.DrawLine(GetPoint(platform, pointCount - 1), GetPoint(platform, 0));
         }
     }
 
-    private void DrawPathPoint(Vector3 point, int index, bool isInitialPoint)
+    private void DrawPathPoint(MovingPlatform platform, Vector3 point, int index, bool isInitialPoint)
     {
         float handleSize = HandleUtility.GetHandleSize(point) * HandleSizeScale;
         Handles.DrawWireDisc(point, Vector3.forward, handleSize);
-        string label = isInitialPoint ? "Start" : string.Format("P{0}", GetPathPointIndex(index) + 1);
+        string label = isInitialPoint ? "Start" : string.Format("P{0}", GetPathPointIndex(platform, index) + 1);
         Handles.Label(point + Vector3.up * handleSize, label);
     }
 
-    private int GetPointCount()
+    private int GetPointCount(MovingPlatform platform)
     {
-        return pathPointsProperty.arraySize + (includeInitialPositionProperty.boolValue ? 1 : 0);
+        return platform.PathPoints.Count + (platform.IncludeInitialPosition ? 1 : 0);
     }
 
     private Vector3 GetPoint(MovingPlatform platform, int index)
     {
-        if (includeInitialPositionProperty.boolValue)
+        if (platform.IncludeInitialPosition)
         {
             if (index == 0)
             {
                 return platform.transform.position;
             }
 
-            return pathPointsProperty.GetArrayElementAtIndex(index - 1).vector2Value;
+            return platform.PathPoints[index - 1];
         }
 
-        return pathPointsProperty.GetArrayElementAtIndex(index).vector2Value;
+        return platform.PathPoints[index];
     }
 
-    private int GetPathPointIndex(int drawnPointIndex)
+    private int GetPathPointIndex(MovingPlatform platform, int drawnPointIndex)
     {
-        return includeInitialPositionProperty.boolValue ? drawnPointIndex - 1 : drawnPointIndex;
+        return platform.IncludeInitialPosition ? drawnPointIndex - 1 : drawnPointIndex;
     }
 
     private void AddPathPoint(Vector3 worldPosition)
     {
         MovingPlatform platform = (MovingPlatform)target;
         Undo.RecordObject(platform, "Add Moving Platform Path Point");
-        serializedObject.Update();
-        int newIndex = pathPointsProperty.arraySize;
-        pathPointsProperty.InsertArrayElementAtIndex(newIndex);
-        pathPointsProperty.GetArrayElementAtIndex(newIndex).vector2Value = new Vector2(worldPosition.x, worldPosition.y);
+        int newIndex = platform.PathPoints.Count;
+        platform.AddPathPoint(new Vector2(worldPosition.x, worldPosition.y));
         selectedPointIndex = newIndex;
-        serializedObject.ApplyModifiedProperties();
         EditorUtility.SetDirty(platform);
         SceneView.RepaintAll();
     }
@@ -217,24 +213,24 @@ public class MovingPlatformEditor : Editor
 
     private Vector3 GetPreviousPathPoint(MovingPlatform platform)
     {
-        if (pathPointsProperty.arraySize <= 0)
+        if (platform.PathPoints.Count <= 0)
         {
             return platform.transform.position;
         }
 
-        return pathPointsProperty.GetArrayElementAtIndex(pathPointsProperty.arraySize - 1).vector2Value;
+        return platform.PathPoints[platform.PathPoints.Count - 1];
     }
 
     private void DeleteSelectedPathPoint(MovingPlatform platform)
     {
-        if (selectedPointIndex < 0 || selectedPointIndex >= pathPointsProperty.arraySize)
+        if (selectedPointIndex < 0 || selectedPointIndex >= platform.PathPoints.Count)
         {
             return;
         }
 
         Undo.RecordObject(platform, "Delete Moving Platform Path Point");
-        pathPointsProperty.DeleteArrayElementAtIndex(selectedPointIndex);
-        selectedPointIndex = Mathf.Clamp(selectedPointIndex - 1, -1, pathPointsProperty.arraySize - 1);
+        platform.RemovePathPointAt(selectedPointIndex);
+        selectedPointIndex = Mathf.Clamp(selectedPointIndex - 1, -1, platform.PathPoints.Count - 1);
         EditorUtility.SetDirty(platform);
         SceneView.RepaintAll();
     }
@@ -243,10 +239,8 @@ public class MovingPlatformEditor : Editor
     {
         MovingPlatform platform = (MovingPlatform)target;
         Undo.RecordObject(platform, "Clear Moving Platform Path Points");
-        serializedObject.Update();
-        pathPointsProperty.ClearArray();
+        platform.ClearPathPoints();
         selectedPointIndex = -1;
-        serializedObject.ApplyModifiedProperties();
         EditorUtility.SetDirty(platform);
         SceneView.RepaintAll();
     }

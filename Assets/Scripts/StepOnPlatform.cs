@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[RequireComponent(typeof(Collider2D))]
 public class StepOnPlatform : MovingPlatform
 {
     [Header("Step On")]
