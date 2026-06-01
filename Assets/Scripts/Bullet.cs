@@ -284,6 +284,17 @@ public class Bullet : MonoBehaviour
             return;
         }
 
+        if (TryRotateFlipPlatform(other))
+        {
+            if (ShouldExplodeOnHit(other))
+            {
+                Explode(other);
+            }
+
+            Destroy(gameObject);
+            return;
+        }
+
         Bubble bubble = Utils.GetBubbleTarget(other);
         if (bubble != null)
         {
@@ -328,6 +339,12 @@ public class Bullet : MonoBehaviour
     {
         FireSwirl fireSwirl = other != null ? other.GetComponentInParent<FireSwirl>() : null;
         return fireSwirl != null && fireSwirl.TryActivateFromFireArrow(this, other);
+    }
+
+    private bool TryRotateFlipPlatform(Collider2D other)
+    {
+        FlipPlatform flipPlatform = other != null ? other.GetComponentInParent<FlipPlatform>() : null;
+        return flipPlatform != null && flipPlatform.RotateFromArrow(this);
     }
 
     private void IgnoreCollisionWith(Collider2D other)
