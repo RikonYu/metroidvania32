@@ -101,6 +101,8 @@ public class Room : MonoBehaviour
             groundTilemap = FindGroundTilemap();
         }
 
+        RoomTilemapLookup.Invalidate();
+
         if (!Application.isPlaying)
         {
             SnapToGridInEditor();
@@ -131,6 +133,7 @@ public class Room : MonoBehaviour
         position.x = Mathf.Round(position.x / BaseWidth) * BaseWidth;
         position.y = Mathf.Round(position.y / BaseHeight) * BaseHeight;
         transform.position = position;
+        RoomTilemapLookup.Invalidate();
     }
 
     public bool Overlaps(Room other)

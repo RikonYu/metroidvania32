@@ -81,7 +81,7 @@ SpriteRenderer:
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 2
-  m_Size: {x: 1, y: 1}
+  m_Size: {x: 3, y: 1}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
   m_WasSpriteAssigned: 1
@@ -105,13 +105,13 @@ BoxCollider2D:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0.5, y: 0.5}
     oldSize: {x: 1, y: 1}
-    newSize: {x: 1, y: 1}
+    newSize: {x: 3, y: 1}
     adaptiveTilingThreshold: 0.5
     drawMode: 2
     adaptiveTiling: 0
   m_AutoTiling: 0
   serializedVersion: 2
-  m_Size: {x: 1, y: 1}
+  m_Size: {x: 3, y: 1}
   m_EdgeRadius: 0
 --- !u!114 &4035758633427170548
 MonoBehaviour:
@@ -125,6 +125,38 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: badc7d2b3cfa1a74694a1dddd15f748d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  trap: {fileID: 7125724408379791501}
+  downTrap: {fileID: 7308079846416588007}
+  uptime: 1
+  downtime: 0
+  facing: 0
+  animationFrameRate: 12
+  segmentWidth: 1
+  length: 3
+  useSpriteRendererSizeAsLength: 1
+  syncColliderSize: 1
+  visualRoot: {fileID: 0}
+  leftFrames:
+  - {fileID: 21300000, guid: 2a7d507c0e69dac4ebe9caf61e9b28d3, type: 3}
+  - {fileID: 21300000, guid: c1d9356fc5ecf8f4b8d136e75053d670, type: 3}
+  - {fileID: 21300000, guid: 74eb5aa77f0b9c04ab9ebcc1b9057621, type: 3}
+  - {fileID: 21300000, guid: bc7b73826e532b84aba5cbd7e1a462ba, type: 3}
+  - {fileID: 21300000, guid: 02bf8843dc2d9a844bd26d852f0f62c8, type: 3}
+  - {fileID: 21300000, guid: eada48b85c3ce9748a0a4ff830c130cb, type: 3}
+  middleFrames:
+  - {fileID: 21300000, guid: 0723b5f54a2d7724e8d9a8cd330963f7, type: 3}
+  - {fileID: 21300000, guid: 2d8111eccaa091247a9c2c7ed973f7cd, type: 3}
+  - {fileID: 21300000, guid: 8a124ffd23726574a817b122f689001f, type: 3}
+  - {fileID: 21300000, guid: cc31326f2af914247894606aa19ff9bb, type: 3}
+  - {fileID: 21300000, guid: f286fefcade86f440b98c668f4e9b387, type: 3}
+  - {fileID: 21300000, guid: 4f1e79a596d5bef4c9d468e8dd969e9d, type: 3}
+  rightFrames:
+  - {fileID: 21300000, guid: d52bd2f14f4ca9245b53fec2ba2429dd, type: 3}
+  - {fileID: 21300000, guid: 5767375829fabcc4e9cbfbba1b404185, type: 3}
+  - {fileID: 21300000, guid: 9d49d5149b9b52f4a9f6efacdb8e02e9, type: 3}
+  - {fileID: 21300000, guid: dcb4b7d50b83002499193793df9c3f98, type: 3}
+  - {fileID: 21300000, guid: 4858a5d4fb277f8489e872b719ab0145, type: 3}
+  - {fileID: 21300000, guid: 66c460265dde33b4095d13f77ee3aedd, type: 3}
 --- !u!1 &7308079846416588007
 GameObject:
   m_ObjectHideFlags: 0
